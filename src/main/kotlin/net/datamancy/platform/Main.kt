@@ -32,6 +32,19 @@ internal fun runCommand(args: Array<String>, out: (String) -> Unit, err: (String
                 val site = Sites.from(Path.of(args[2])).select(args[3])
                 out(Json.encodeToString(RenderPlan.forSite(site)))
             }
+            args.size in 4..5 && args[0] == "probe" && args[1] in setOf("prepare", "install", "stop", "remove", "snapshot", "restore") -> {
+                val selection = ProbeSelection(args[2], args[3])
+                val lifecycle = ProbeLifecycle.real()
+                when (args[1]) {
+                    "prepare" -> { require(args.size == 4); lifecycle.prepare(selection) }
+                    "install" -> { require(args.size == 4); lifecycle.install(selection) }
+                    "stop" -> { require(args.size == 4); lifecycle.stop(selection) }
+                    "remove" -> { require(args.size == 4); lifecycle.remove(selection) }
+                    "snapshot" -> { require(args.size == 5); lifecycle.snapshot(selection, args[4]) }
+                    "restore" -> { require(args.size == 5); lifecycle.restoreIsolated(selection, args[4]) }
+                }
+                out("Restricted probe ${args[1]} completed; no catalog module or production service accepted")
+            }
             args.size == 6 && args[0] == "contract" && args[1] == "plan" -> {
                 val site = DeploymentSite.hostLocal(Path.of(args[2]))
                 val boundary = DeploymentBoundary(Path.of(args[4]), Path.of(args[5]), DeploymentSite.approvedHosts(Path.of(args[3])))
@@ -51,7 +64,7 @@ internal fun runCommand(args: Array<String>, out: (String) -> Unit, err: (String
                 out("Offline workspace restored; no live services changed")
             }
             else -> {
-                err("Usage: platform catalog validate|list | site validate <sites.json> <site> | plan render <sites.json> <site> | contract plan <site.json> <approved-hosts.json> <data-root> <backup-root> | lane plan <request.json> <trusted-issuer> <occupied-usernames.json> | stage offline <sites.json> <site> <temp-workspace> | stage restore <temp-workspace> <site>")
+                err("Usage: platform probe prepare|install|stop|remove <site> <local-sha256-image-id> | probe snapshot|restore <site> <local-sha256-image-id> <snapshot-id> | catalog validate|list | site validate <sites.json> <site> | plan render <sites.json> <site> | contract plan <site.json> <approved-hosts.json> <data-root> <backup-root> | lane plan <request.json> <trusted-issuer> <occupied-usernames.json> | stage offline <sites.json> <site> <temp-workspace> | stage restore <temp-workspace> <site>")
                 return 2
             }
         }
