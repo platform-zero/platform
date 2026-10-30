@@ -32,6 +32,24 @@ internal fun runCommand(args: Array<String>, out: (String) -> Unit, err: (String
                 val site = Sites.from(Path.of(args[2])).select(args[3])
                 out(Json.encodeToString(RenderPlan.forSite(site)))
             }
+            args.size in 3..4 && args[0] == "module" && args[1] == "postgres" -> {
+                val sandbox = PostgresSandbox.real()
+                when (args[2]) {
+                    "prepare" -> { require(args.size == 3); sandbox.prepare() }
+                    "install" -> { require(args.size == 3); sandbox.install() }
+                    "stop" -> { require(args.size == 3); sandbox.stop() }
+                    "remove" -> { require(args.size == 3); sandbox.remove() }
+                    "write" -> { require(args.size == 3); sandbox.writeFixture() }
+                    "query" -> { require(args.size == 3); out(sandbox.query()) }
+                    "backup" -> { require(args.size == 4); sandbox.backup(args[3]) }
+                    "restore" -> { require(args.size == 4); sandbox.restore(args[3]) }
+                    "restored-write" -> { require(args.size == 4); sandbox.writeRestored(args[3]) }
+                    "restored-query" -> { require(args.size == 4); out(sandbox.query(args[3])) }
+                    "restore-remove" -> { require(args.size == 4); sandbox.removeRestore(args[3]) }
+                    else -> throw IllegalArgumentException("Unknown postgres sandbox action")
+                }
+                out("Isolated postgres sandbox ${args[2]} completed; no other inventory module accepted")
+            }
             args.size in 3..4 && args[0] == "module" && args[1] == "ntfy" -> {
                 val sandbox = NtfySandbox.real()
                 when (args[2]) {
@@ -78,7 +96,7 @@ internal fun runCommand(args: Array<String>, out: (String) -> Unit, err: (String
                 out("Offline workspace restored; no live services changed")
             }
             else -> {
-                err("Usage: platform module ntfy prepare|install|stop|remove|snapshot|restore|restore-remove [snapshot-id] | probe prepare|install|stop|remove <site> <local-sha256-image-id> | probe snapshot|restore <site> <local-sha256-image-id> <snapshot-id> | catalog validate|list | site validate <sites.json> <site> | plan render <sites.json> <site> | contract plan <site.json> <approved-hosts.json> <data-root> <backup-root> | lane plan <request.json> <trusted-issuer> <occupied-usernames.json> | stage offline <sites.json> <site> <temp-workspace> | stage restore <temp-workspace> <site>")
+                err("Usage: platform module postgres prepare|install|stop|remove|write|query|backup|restore|restored-write|restored-query|restore-remove [backup-id] | module ntfy prepare|install|stop|remove|snapshot|restore|restore-remove [snapshot-id] | probe prepare|install|stop|remove <site> <local-sha256-image-id> | probe snapshot|restore <site> <local-sha256-image-id> <snapshot-id> | catalog validate|list | site validate <sites.json> <site> | plan render <sites.json> <site> | contract plan <site.json> <approved-hosts.json> <data-root> <backup-root> | lane plan <request.json> <trusted-issuer> <occupied-usernames.json> | stage offline <sites.json> <site> <temp-workspace> | stage restore <temp-workspace> <site>")
                 return 2
             }
         }

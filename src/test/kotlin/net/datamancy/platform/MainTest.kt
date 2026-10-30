@@ -7,6 +7,19 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class MainTest {
+    @Test fun `postgres CLI rejects malformed actions before any real sandbox side effects`() {
+        val output = mutableListOf<String>()
+        val errors = mutableListOf<String>()
+        for (action in listOf("prepare", "install", "stop", "remove", "write", "query")) {
+            assertEquals(1, runCommand(arrayOf("module", "postgres", action, "unexpected"), output::add, errors::add))
+        }
+        for (action in listOf("backup", "restore", "restored-write", "restored-query", "restore-remove")) {
+            assertEquals(1, runCommand(arrayOf("module", "postgres", action), output::add, errors::add))
+        }
+        assertEquals(1, runCommand(arrayOf("module", "postgres", "unrecognized"), output::add, errors::add))
+        assertTrue(output.isEmpty())
+        assertTrue(errors.all { it.startsWith("Rejected:") })
+    }
     @Test fun `catalog CLI exposes inventory without deployment claims`() {
         val output = mutableListOf<String>()
         val errors = mutableListOf<String>()
