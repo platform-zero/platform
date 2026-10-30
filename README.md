@@ -20,7 +20,19 @@ Site/workload IDs are bounded slugs; workloads must be explicitly named, cannot 
 
 ## Verified unit coverage gate
 
-Run `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 GRADLE_USER_HOME=/mnt/media/p0-v3/cache/gradle-user ./gradlew clean check --offline` to run the tests and the JaCoCo **LINE** covered-ratio verification gate (minimum **90%**, bundle-wide, all production JVM classes; no class, package or source exclusions). The `check` task depends on `jacocoTestCoverageVerification`, which depends on the XML/HTML report and tests. From a clean run: **182 covered / 188 total production Kotlin lines = 96.81%** (6 missed), with **12 tests, 0 failures**. Source breakdown: `Sites.kt` 43/43, `Catalog.kt` 26/27, `IsolatedStage.kt` 81/86, `Main.kt` 32/32. Report: `build/reports/jacoco/test/jacocoTestReport.xml` and `build/reports/jacoco/test/html/index.html`. This is unit/CLI/offline filesystem coverage, **not** functional deployment, backup/restore proof or full-stack acceptance.
+Run `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 GRADLE_USER_HOME=/mnt/media/p0-v3/cache/gradle-user ./gradlew clean check --offline` to run the tests and the JaCoCo **LINE** covered-ratio verification gate (minimum **90%**, bundle-wide, all production JVM classes; no class, package or source exclusions). The `check` task depends on `jacocoTestCoverageVerification`, which depends on the XML/HTML report and tests. From a clean run: **236 covered / 243 total production Kotlin lines = 97.12%** (7 missed), with **18 tests, 0 failures**. Source breakdown: `Sites.kt` 43/43, `LaneAccounts.kt` 50/51, `Catalog.kt` 26/27, `IsolatedStage.kt` 81/86, `Main.kt` 36/36. Report: `build/reports/jacoco/test/jacocoTestReport.xml` and `build/reports/jacoco/test/html/index.html`. This is unit/CLI/offline filesystem coverage, **not** functional deployment, backup/restore proof or full-stack acceptance.
+
+## Offline SSO-to-Linux lane-account intents
+
+The separate `lane plan <request.json> <trusted-issuer> <occupied-usernames.json>` command emits **JSON data only**. No useradd, account database reads, PAM changes, directory creation, SSO changes, or live service operations occur. Example request (identifiers are illustrative, not a verified SSO deployment):
+
+```json
+{"schemaVersion":1,"siteId":"scratch","issuer":"https://sso.example.test/realms/v3","humans":[{"subject":"opaque-human-a","username":"p0v3_alice"}],"agentSubjects":["opaque-agent-a"]}
+```
+
+The independently supplied trusted HTTPS issuer must **exactly** match the request. Subjects are bounded, case-sensitive opaque IDs; duplicates among humans or across human/agent identities are rejected. Each human has exactly one explicit bounded `p0v3_` username; duplicate names, reserved suffixes (including `gerald`, `software_lab`, `root`, `agent`), unsafe names, and names in the supplied occupied-username snapshot are rejected. The snapshot is a nonempty JSON string array of Linux usernames, e.g. `["root","gerald","software_lab"]`; the planner does **not** collect it from the host or assert it is fresh/complete. The plan is sorted by username and contains no account command, passwords, agent account intents or application permissions. Agents remain separate application identities; lack of a Linux lane account does **not** reduce their application access or create a host-account requirement.
+
+**Still missing for real deployment:** independent issuer and subject verification against a real SSO authority, current complete host-account/UID inventory and race-safe collision enforcement, account/UID and lane-storage lifecycle design, authorization review for human and agent application access, safe provisioning/rollback, and functional backup/restore acceptance. Do not apply the plan on this host. The required two clean full-stack installs remain **0/2**.
 
 ## Non-negotiable boundaries
 
