@@ -1,0 +1,7 @@
+.gradle/
+build/
+out/
+*.env
+*.key
+*.p12
+site/
