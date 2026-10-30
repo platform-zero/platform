@@ -21,6 +21,24 @@ class CatalogTest {
         assertFailsWith<IllegalArgumentException> { catalog.validate() }
     }
 
+    @Test fun `catalog rejects malformed schema modules and IDs before install claims`() {
+        val valid = ServiceCatalog.bundled()
+        assertFailsWith<IllegalArgumentException> { valid.copy(schemaVersion = 2).validate() }
+        assertFailsWith<IllegalArgumentException> { valid.copy(modules = emptyList()).validate() }
+        assertFailsWith<IllegalArgumentException> {
+            valid.copy(modules = valid.modules + ServiceModule("bad id", listOf("new"))).validate()
+        }
+        assertFailsWith<IllegalArgumentException> {
+            valid.copy(modules = valid.modules + valid.modules.first()).validate()
+        }
+        assertFailsWith<IllegalArgumentException> {
+            valid.copy(modules = valid.modules.dropLast(1) + ServiceModule("test-runners", listOf("BAD"))).validate()
+        }
+        assertFailsWith<Exception> {
+            ServiceCatalog.from("""{"schemaVersion":1,"modules":[],"installed":true}""".byteInputStream())
+        }
+    }
+
     @Test fun `missing IDs are refused`() {
         assertFailsWith<IllegalArgumentException> {
             ServiceCatalog(1, listOf(ServiceModule("app", listOf("app")))).validate()

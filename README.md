@@ -18,6 +18,10 @@ Commands: `site validate <sites.json> <site-id>`, `plan render <sites.json> <sit
 
 Site/workload IDs are bounded slugs; workloads must be explicitly named, cannot reuse any inventory service ID, and require a SHA-256-pinned image reference. Unknown config fields (including secrets, environment, routes and mounts) are rejected. Render order is stable; each file uses `Network=none` and `ReadOnly=true`. The JSON render plan includes the Quadlet text and is safe to compare in tests, but should **not** be interpreted as acceptance of that image or application. The isolated staging and rollback tests check filesystem behavior only. Do not copy these files to a live Quadlet search path until an independently reviewed deployment, backup, functional restore and acceptance process exists.
 
+## Verified unit coverage gate
+
+Run `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 GRADLE_USER_HOME=/mnt/media/p0-v3/cache/gradle-user ./gradlew clean check --offline` to run the tests and the JaCoCo **LINE** covered-ratio verification gate (minimum **90%**, bundle-wide, all production JVM classes; no class, package or source exclusions). The `check` task depends on `jacocoTestCoverageVerification`, which depends on the XML/HTML report and tests. From a clean run: **182 covered / 188 total production Kotlin lines = 96.81%** (6 missed), with **12 tests, 0 failures**. Source breakdown: `Sites.kt` 43/43, `Catalog.kt` 26/27, `IsolatedStage.kt` 81/86, `Main.kt` 32/32. Report: `build/reports/jacoco/test/jacocoTestReport.xml` and `build/reports/jacoco/test/html/index.html`. This is unit/CLI/offline filesystem coverage, **not** functional deployment, backup/restore proof or full-stack acceptance.
+
 ## Non-negotiable boundaries
 
 - SSO: distinct Keycloak identities for each human and agent, equal application policy across stack services; one host Linux account per human for their v3 lanes.
