@@ -32,6 +32,20 @@ internal fun runCommand(args: Array<String>, out: (String) -> Unit, err: (String
                 val site = Sites.from(Path.of(args[2])).select(args[3])
                 out(Json.encodeToString(RenderPlan.forSite(site)))
             }
+            args.size in 3..4 && args[0] == "module" && args[1] == "ntfy" -> {
+                val sandbox = NtfySandbox.real()
+                when (args[2]) {
+                    "prepare" -> { require(args.size == 3); sandbox.prepare() }
+                    "install" -> { require(args.size == 3); sandbox.install() }
+                    "stop" -> { require(args.size == 3); sandbox.stop() }
+                    "remove" -> { require(args.size == 3); sandbox.remove() }
+                    "snapshot" -> { require(args.size == 4); sandbox.snapshot(args[3]) }
+                    "restore" -> { require(args.size == 4); sandbox.restore(args[3]) }
+                    "restore-remove" -> { require(args.size == 4); sandbox.removeRestore(args[3]) }
+                    else -> throw IllegalArgumentException("Unknown ntfy sandbox action")
+                }
+                out("Isolated ntfy sandbox ${args[2]} completed; no other inventory module accepted")
+            }
             args.size in 4..5 && args[0] == "probe" && args[1] in setOf("prepare", "install", "stop", "remove", "snapshot", "restore") -> {
                 val selection = ProbeSelection(args[2], args[3])
                 val lifecycle = ProbeLifecycle.real()
@@ -64,7 +78,7 @@ internal fun runCommand(args: Array<String>, out: (String) -> Unit, err: (String
                 out("Offline workspace restored; no live services changed")
             }
             else -> {
-                err("Usage: platform probe prepare|install|stop|remove <site> <local-sha256-image-id> | probe snapshot|restore <site> <local-sha256-image-id> <snapshot-id> | catalog validate|list | site validate <sites.json> <site> | plan render <sites.json> <site> | contract plan <site.json> <approved-hosts.json> <data-root> <backup-root> | lane plan <request.json> <trusted-issuer> <occupied-usernames.json> | stage offline <sites.json> <site> <temp-workspace> | stage restore <temp-workspace> <site>")
+                err("Usage: platform module ntfy prepare|install|stop|remove|snapshot|restore|restore-remove [snapshot-id] | probe prepare|install|stop|remove <site> <local-sha256-image-id> | probe snapshot|restore <site> <local-sha256-image-id> <snapshot-id> | catalog validate|list | site validate <sites.json> <site> | plan render <sites.json> <site> | contract plan <site.json> <approved-hosts.json> <data-root> <backup-root> | lane plan <request.json> <trusted-issuer> <occupied-usernames.json> | stage offline <sites.json> <site> <temp-workspace> | stage restore <temp-workspace> <site>")
                 return 2
             }
         }
