@@ -32,6 +32,13 @@ internal fun runCommand(args: Array<String>, out: (String) -> Unit, err: (String
                 val site = Sites.from(Path.of(args[2])).select(args[3])
                 out(Json.encodeToString(RenderPlan.forSite(site)))
             }
+            args.size == 3 && args[0] == "module" && args[1] == "sandbox-backup" &&
+                args[2] in setOf("due", "two") -> {
+                val count = if (args[2] == "due") {
+                    if (SandboxBackupSchedule.real().runDue()) 1 else 0
+                } else SandboxBackupSchedule.real(periodSeconds = 3).runBounded(maxRuns = 2)
+                out("Bounded two-module sandbox backup completed $count slot(s); no full-stack acceptance")
+            }
             args.size in 3..4 && args[0] == "module" && args[1] == "postgres" -> {
                 val sandbox = PostgresSandbox.real()
                 when (args[2]) {
@@ -96,7 +103,7 @@ internal fun runCommand(args: Array<String>, out: (String) -> Unit, err: (String
                 out("Offline workspace restored; no live services changed")
             }
             else -> {
-                err("Usage: platform module postgres prepare|install|stop|remove|write|query|backup|restore|restored-write|restored-query|restore-remove [backup-id] | module ntfy prepare|install|stop|remove|snapshot|restore|restore-remove [snapshot-id] | probe prepare|install|stop|remove <site> <local-sha256-image-id> | probe snapshot|restore <site> <local-sha256-image-id> <snapshot-id> | catalog validate|list | site validate <sites.json> <site> | plan render <sites.json> <site> | contract plan <site.json> <approved-hosts.json> <data-root> <backup-root> | lane plan <request.json> <trusted-issuer> <occupied-usernames.json> | stage offline <sites.json> <site> <temp-workspace> | stage restore <temp-workspace> <site>")
+                err("Usage: platform module sandbox-backup due|two | module postgres prepare|install|stop|remove|write|query|backup|restore|restored-write|restored-query|restore-remove [backup-id] | module ntfy prepare|install|stop|remove|snapshot|restore|restore-remove [snapshot-id] | probe prepare|install|stop|remove <site> <local-sha256-image-id> | probe snapshot|restore <site> <local-sha256-image-id> <snapshot-id> | catalog validate|list | site validate <sites.json> <site> | plan render <sites.json> <site> | contract plan <site.json> <approved-hosts.json> <data-root> <backup-root> | lane plan <request.json> <trusted-issuer> <occupied-usernames.json> | stage offline <sites.json> <site> <temp-workspace> | stage restore <temp-workspace> <site>")
                 return 2
             }
         }

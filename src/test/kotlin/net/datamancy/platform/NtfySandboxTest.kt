@@ -48,6 +48,8 @@ class NtfySandboxTest {
             assertFailsWith<IllegalArgumentException> { service.snapshot("first") } // running SQLite
             service.stop()
             service.snapshot("first")
+            service.start()
+            assertTrue(fake.running.contains("p0v3-sandbox-ntfy-fixture"))
             assertTrue(Files.isRegularFile(backup.resolve("ntfy-fixture/first/.manifest")))
             Files.writeString(data, "mutated-after")
             service.restore("first")

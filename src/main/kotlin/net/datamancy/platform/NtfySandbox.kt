@@ -90,9 +90,15 @@ internal class NtfySandbox(private val base: Path, private val backups: Path, pr
     }
 
     fun install() { create(container, guard().resolve("data"), 18486) }
+    fun requireRunning() { require(names(true).trim() == container) { "Primary ntfy sandbox not running" } }
     fun stop() {
         require(names(false).trim() == container) { "Primary ntfy container absent" }
         podman(listOf("stop", "--time=10", container))
+    }
+    fun start() {
+        require(names(false).trim() == container && names(true).isBlank()) { "Primary ntfy must be stopped" }
+        podman(listOf("start", container))
+        require(names(true).trim() == container) { "Primary ntfy failed to restart" }
     }
     fun remove() { stop(); podman(listOf("rm", container)) }
 
