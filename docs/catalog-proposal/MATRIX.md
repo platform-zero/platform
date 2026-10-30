@@ -48,7 +48,7 @@ Inventory: [authoritative manifest](../../src/main/resources/services.json). **4
 | jupyterhub | D | UI | No verified official Android; browser candidate | `notebooks.datamancy.net` | Hub DB, cookie/crypto secrets, user notebook home dirs, authenticator state; spawner details TBD. | Sign in, execute cell, save notebook; reopen after DB+home+keys restore. |
 
 ## kopia — [repository server](https://kopia.io/docs/repository-server/) / [repositories](https://kopia.io/docs/repositories/)
-| kopia | D? (server vs CLI schedule **unknown**) | UI **if** server enabled; otherwise H | No verified official Android | `backup.datamancy.net` **only if UI server and protected** | Encrypted repository at **separate chosen storage**, repository password/key, policies, config; never claim success from UI alone. | Back up a test file, inspect snapshot and restore bytes to isolated path; test off-host survivability. |
+| kopia | D? (server vs CLI schedule **unknown**) | UI **if** server enabled; otherwise H | No verified official Android | `backup.datamancy.net` **only if UI server and protected** | Encrypted repository at **separate chosen storage**, repository password/key, policies, config; never claim success from UI alone. | Back up a test file, inspect snapshot and restore bytes to an isolated path; off-host survivability is deferred. |
 
 ## loki — [Loki docs](https://grafana.com/docs/loki/latest/)
 | loki | D | API/H (not end-user UI) | N/A | — | Index/chunks/WAL/object store depending mode and retention; config. | Query labelled log after restart/restore within retention policy. |

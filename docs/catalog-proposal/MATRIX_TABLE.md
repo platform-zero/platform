@@ -92,7 +92,7 @@ Inventory: [authoritative manifest](../../src/main/resources/services.json). **4
 
 | Service ID | Mode | Surface | Android/client | Proposed real route on datamancy.net | Persistent state / backup scope | Meaningful action / restore evidence |
 |---|---|---|---|---|---|---|
-| kopia | D? (server vs CLI schedule **unknown**) | UI **if** server enabled; otherwise H | No verified official Android | `backup.datamancy.net` **only if UI server and protected** | Encrypted repository at **separate chosen storage**, repository password/key, policies, config; never claim success from UI alone. | Back up a test file, inspect snapshot and restore bytes to isolated path; test off-host survivability. |
+| kopia | D? (server vs CLI schedule **unknown**) | UI **if** server enabled; otherwise H | No verified official Android | `backup.datamancy.net` **only if UI server and protected** | Encrypted repository at **separate chosen storage**, repository password/key, policies, config; never claim success from UI alone. | Back up a test file, inspect snapshot and restore bytes to an isolated path; off-host survivability is deferred. |
 
 ## loki — [Loki docs](https://grafana.com/docs/loki/latest/)
 
