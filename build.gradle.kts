@@ -16,9 +16,28 @@ dependencies {
 }
 
 application { mainClass.set("net.datamancy.platform.MainKt") }
+// Keep archive metadata/order from changing the candidate identity on an unchanged rebuild.
+tasks.withType<org.gradle.api.tasks.bundling.AbstractArchiveTask>().configureEach {
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+}
+// Unit imports may create local Python caches; these are not runtime source artifacts.
+tasks.processResources { exclude("**/__pycache__/**", "**/*.pyc") }
 tasks.test {
-    useJUnitPlatform()
+    // Unit-only even when an integration opt-in variable leaks from the parent shell.
+    exclude("**/*RealIntegrationTest*")
+    useJUnitPlatform { excludeTags("native", "integration", "real-domain", "sandbox-web") }
     finalizedBy(tasks.jacocoTestReport)
+}
+
+tasks.register<Test>("nativeIntegrationTest") {
+    description = "Explicit opt-in native checks; never part of test/check or unit coverage"
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    include("**/*RealIntegrationTest*")
+    useJUnitPlatform()
+    onlyIf { providers.gradleProperty("nativeIntegration").orNull == "true" }
 }
 
 jacoco { toolVersion = "0.8.13" }

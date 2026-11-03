@@ -1,0 +1,39 @@
+{
+  "feeds": [
+    {
+      "id": "guardian-australia",
+      "account": "rss_guardian_australia",
+      "display_name": "Guardian Australia",
+      "source": "The Guardian",
+      "url": "https://www.theguardian.com/australia-news/rss"
+    },
+    {
+      "id": "conversation-au",
+      "account": "rss_conversation_au",
+      "display_name": "The Conversation AU",
+      "source": "The Conversation",
+      "url": "https://theconversation.com/au/articles.atom"
+    },
+    {
+      "id": "crikey",
+      "account": "rss_crikey",
+      "display_name": "Crikey",
+      "source": "Crikey",
+      "url": "https://www.crikey.com.au/feed/"
+    },
+    {
+      "id": "australia-institute",
+      "account": "rss_australia_institute",
+      "display_name": "The Australia Institute",
+      "source": "The Australia Institute",
+      "url": "https://australiainstitute.org.au/feed/"
+    },
+    {
+      "id": "renew-economy",
+      "account": "rss_renew_economy",
+      "display_name": "Renew Economy",
+      "source": "Renew Economy",
+      "url": "https://reneweconomy.com.au/feed/"
+    }
+  ]
+}

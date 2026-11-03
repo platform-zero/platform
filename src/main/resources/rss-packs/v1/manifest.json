@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "reviewStatus": "pending-independent-content-review",
+  "packs": [
+    {"name":"analysis","sha256":"d0c1bf101e5bf5754df35030281b042e6b15b633826afab55c23e14ab4fc2ceb"},
+    {"name":"aus-state","sha256":"48e025320acb5dca4dd4e9dd42589216629598d9bcff549b38b2edd2f0e363f6"},
+    {"name":"aus","sha256":"a4a72ff0388e319d34bac44eccbb2cd8941fb9d7edf95bb0b7e360090f7bb51e"},
+    {"name":"china-state","sha256":"fe3db7a94a0c95d084dd96fa2ba50ae0cd750179185e6c2c0b9ed436aea4a8b8"},
+    {"name":"china","sha256":"2269a21dae1e3ea7b952ac9b796a91ddbd0dd0e87a216c2cd87fc83cfe7a4664"},
+    {"name":"tas","sha256":"4e2b5e0904855515106aac0c19ca75c382022b2042a6ed7a50b635cb894ba5a1"},
+    {"name":"us-state","sha256":"557e90b60bfd25de7e1409c84d78b3fdce3f3255e267f4d785be1a6cc96dec23"},
+    {"name":"us","sha256":"90fe29abf183da47fd6dce81e337afc0ff5ceed98205c8381989d4b505a9a86d"},
+    {"name":"world","sha256":"6e85ea8a0590123be8f813049cc9412627f131d193b485fcc9e8b6fe1f50a049"}
+  ]
+}

@@ -1,0 +1,8 @@
+# Context must contain the exact static helper plus retained upstream/packaging source and licenses.
+# No package installation, network access or runtime download.
+FROM quay.io/prometheus/node-exporter@sha256:da83fae85603c4e47e6c68369a7d746e2dda683dc35ea2e234b4f171e0d92798
+COPY --chmod=0555 catatonit /sbin/catatonit
+COPY source/ /usr/share/doc/p0v3-catatonit/
+RUN echo '84e9bde9a352e11949c9a09abe64b81e83d5dc345a9d99c62eefdfdfc359bb96  /sbin/catatonit' | sha256sum -c -
+USER 65534:65534
+ENTRYPOINT ["/sbin/catatonit", "--", "/bin/node_exporter"]

@@ -20,14 +20,33 @@ data class ProbeSelection(val site: String, val imageId: String) {
 internal interface ProbeCommands { fun invoke(arguments: List<String>): String }
 
 /** All Podman state is redirected into a site-private vfs store. No registry pulls. */
-internal class RootlessPodman(private val siteRoot: Path) : ProbeCommands {
-    override fun invoke(arguments: List<String>): String {
+internal class RootlessPodman(private val siteRoot: Path, private val networkConfigDir: Path? = null) : ProbeCommands {
+    internal fun argumentsPrefix(): List<String> {
         require(com.sun.security.auth.module.UnixSystem().uid != 0L) { "Rootless Podman required" }
-        val command = listOf("podman", "--remote=false", "--root=${siteRoot.resolve("podman-root")}",
+        if (networkConfigDir != null) {
+            val config = siteRoot.resolve("containers.conf")
+            require(Files.isRegularFile(config, NOFOLLOW_LINKS) &&
+                Files.readString(config) == "[network]\ndefault_rootless_network_cmd = \"slirp4netns\"\n" &&
+                Files.getPosixFilePermissions(config) == setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE) &&
+                Files.getAttribute(config, "unix:uid", NOFOLLOW_LINKS) == com.sun.security.auth.module.UnixSystem().uid.toInt() &&
+                networkConfigDir == siteRoot.resolve("network-config") &&
+                Files.isDirectory(networkConfigDir, NOFOLLOW_LINKS) &&
+                Files.getPosixFilePermissions(networkConfigDir) == setOf(PosixFilePermission.OWNER_READ,
+                    PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE) &&
+                Files.getAttribute(networkConfigDir, "unix:uid", NOFOLLOW_LINKS) == com.sun.security.auth.module.UnixSystem().uid.toInt()) {
+                "Network definitions require a site-owned private directory"
+            }
+        }
+        return listOf("podman", "--remote=false", "--root=${siteRoot.resolve("podman-root")}",
             "--runroot=${siteRoot.resolve("podman-run")}", "--storage-driver=vfs",
-            "--events-backend=file", "--cgroup-manager=cgroupfs") + arguments
+            "--events-backend=file", "--cgroup-manager=cgroupfs") +
+            (if (networkConfigDir == null) emptyList() else listOf("--network-config-dir=$networkConfigDir"))
+    }
+    override fun invoke(arguments: List<String>): String {
+        val command = argumentsPrefix() + arguments
         val builder = ProcessBuilder(command).redirectErrorStream(true)
         listOf("CONTAINER_HOST", "CONTAINER_CONNECTION", "DOCKER_HOST", "PODMAN_HOST").forEach(builder.environment()::remove)
+        if (networkConfigDir != null) builder.environment()["CONTAINERS_CONF"] = siteRoot.resolve("containers.conf").toString()
         val process = builder.start()
         if (!process.waitFor(60, TimeUnit.SECONDS)) {
             process.destroyForcibly()

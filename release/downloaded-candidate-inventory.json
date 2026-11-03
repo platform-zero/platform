@@ -1,0 +1,773 @@
+{
+  "schemaVersion": 1,
+  "status": "downloaded-candidates-not-a-reviewed-compatible-release",
+  "images": [
+    {
+      "product": "office-rabbitmq",
+      "source": "https://www.rabbitmq.com/docs/4.2/download",
+      "reference": "docker.io/library/rabbitmq:4.2.9",
+      "pinnedImage": "docker.io/library/rabbitmq@sha256:72a08a1d9c37795e6885dcf006f2ea64aa0a11e6c6b026f642550e3819316e29",
+      "imageId": "8b646aacb13221906d2295ff6a5993eb798e1fef909a5c1d5fb413d948c0fe85",
+      "repoDigests": ["docker.io/library/rabbitmq@sha256:00ffa1f5d019f57bcfb48e1ac5c5c42147fbe941a19e087c1cc1940976bdeb47", "docker.io/library/rabbitmq@sha256:72a08a1d9c37795e6885dcf006f2ea64aa0a11e6c6b026f642550e3819316e29"],
+      "selectedManifestDigest": "sha256:72a08a1d9c37795e6885dcf006f2ea64aa0a11e6c6b026f642550e3819316e29",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "alertmanager",
+      "source": "https://github.com/prometheus/alertmanager/releases/tag/v0.34.2",
+      "reference": "quay.io/prometheus/alertmanager:v0.34.2",
+      "pinnedImage": "quay.io/prometheus/alertmanager@sha256:7619e9399e623c9f99a40cb199c2bceb972cbf725598a51dcbde69d51dcaaedf",
+      "imageId": "151292169170da9f8414b68c8e5994c75bd9cbb94ff60b8bc90860c4994b0946",
+      "repoDigests": [
+        "quay.io/prometheus/alertmanager@sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b",
+        "quay.io/prometheus/alertmanager@sha256:7619e9399e623c9f99a40cb199c2bceb972cbf725598a51dcbde69d51dcaaedf"
+      ],
+      "selectedManifestDigest": "sha256:7619e9399e623c9f99a40cb199c2bceb972cbf725598a51dcbde69d51dcaaedf",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "alloy",
+      "source": "https://github.com/grafana/alloy/releases/tag/v1.21.3",
+      "reference": "docker.io/grafana/alloy:v1.21.3",
+      "pinnedImage": "docker.io/grafana/alloy@sha256:5ed61e8ab102bdf590ea3d67c5e29dfb5837f5b4660a1d2a0db4b8160553e9e7",
+      "imageId": "f203d78239ad619363d4f1aa5d5ca85424155ab36518c9bc913ceb54f4370380",
+      "repoDigests": [
+        "docker.io/grafana/alloy@sha256:5ed61e8ab102bdf590ea3d67c5e29dfb5837f5b4660a1d2a0db4b8160553e9e7",
+        "docker.io/grafana/alloy@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4"
+      ],
+      "selectedManifestDigest": "sha256:5ed61e8ab102bdf590ea3d67c5e29dfb5837f5b4660a1d2a0db4b8160553e9e7",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "bookstack",
+      "source": "https://github.com/linuxserver/docker-bookstack/releases/tag/v26.09.2-ls294",
+      "reference": "lscr.io/linuxserver/bookstack:version-v26.09.2",
+      "pinnedImage": "lscr.io/linuxserver/bookstack@sha256:b7c7030d23f421ec2a64cd16f505ec315d1ed66ce9870bd2c1c4513e38282e28",
+      "imageId": "5105ec6915afd3f6ed521f4124d9cb064a49600bbc834c2a439634af1fd585f7",
+      "repoDigests": [
+        "lscr.io/linuxserver/bookstack@sha256:b7c7030d23f421ec2a64cd16f505ec315d1ed66ce9870bd2c1c4513e38282e28",
+        "lscr.io/linuxserver/bookstack@sha256:da6324232770050b7d5f6222e8f4e223f1c688363b02ebb3c15a7546dd7133d5"
+      ],
+      "selectedManifestDigest": "sha256:b7c7030d23f421ec2a64cd16f505ec315d1ed66ce9870bd2c1c4513e38282e28",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "caddy",
+      "source": "https://github.com/caddyserver/caddy/releases/tag/v2.11.7",
+      "reference": "docker.io/library/caddy:2.11.7",
+      "pinnedImage": "docker.io/library/caddy@sha256:04913b1da43339a40ad1ea87827d70a576ac5aa6cf674c6e24fdca675887533a",
+      "imageId": "3067cc4e02c091399edbd5d65f85a3ff4d511574aecadb47f280c3761e68852e",
+      "repoDigests": [
+        "docker.io/library/caddy@sha256:04913b1da43339a40ad1ea87827d70a576ac5aa6cf674c6e24fdca675887533a",
+        "docker.io/library/caddy@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e"
+      ],
+      "selectedManifestDigest": "sha256:04913b1da43339a40ad1ea87827d70a576ac5aa6cf674c6e24fdca675887533a",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "crowdsec",
+      "source": "https://github.com/crowdsecurity/crowdsec/releases/tag/v1.8.2",
+      "reference": "docker.io/crowdsecurity/crowdsec:v1.8.2",
+      "pinnedImage": "docker.io/crowdsecurity/crowdsec@sha256:2191029f82fce28971706f146cd0cde20a5d39dc9a0ccef7dfffc503d74bc707",
+      "imageId": "5b37d0928f5b8600d2a09b1414471f77cbf2615be5e403311e66eb188852b018",
+      "repoDigests": [
+        "docker.io/crowdsecurity/crowdsec@sha256:2191029f82fce28971706f146cd0cde20a5d39dc9a0ccef7dfffc503d74bc707",
+        "docker.io/crowdsecurity/crowdsec@sha256:65b74942f7e7ed5c60fde4ac15fc4ba715904c398c8b16dd451f4907d90347d4"
+      ],
+      "selectedManifestDigest": "sha256:2191029f82fce28971706f146cd0cde20a5d39dc9a0ccef7dfffc503d74bc707",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "donetick",
+      "source": "https://github.com/donetick/donetick/releases/tag/v0.1.85",
+      "reference": "docker.io/donetick/donetick:v0.1.85",
+      "pinnedImage": "docker.io/donetick/donetick@sha256:a1e0a69634b1f8ca83a4a62a00e8187003ac2ce64a3e73dea6e7aba1e77a025d",
+      "imageId": "2affe46e11129417c5ec88225e4295c5c313fe419b99de53e0ddf569745e13f7",
+      "repoDigests": [
+        "docker.io/donetick/donetick@sha256:a1e0a69634b1f8ca83a4a62a00e8187003ac2ce64a3e73dea6e7aba1e77a025d",
+        "docker.io/donetick/donetick@sha256:fe6b04d496f315181c196bdf1fbea93d3525e105642c2d0b7a3e5dd7b53d3674"
+      ],
+      "selectedManifestDigest": "sha256:a1e0a69634b1f8ca83a4a62a00e8187003ac2ce64a3e73dea6e7aba1e77a025d",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "element",
+      "source": "https://github.com/element-hq/element-web/releases/tag/v1.12.33",
+      "reference": "docker.io/vectorim/element-web:v1.12.33",
+      "pinnedImage": "docker.io/vectorim/element-web@sha256:149a9e54a4823295c65008d9b5d1adb4462ed953f49bf3b740efa8e0fc4bad9a",
+      "imageId": "c1bbbfe33653e37530c2bfdae0d9c10f4c99441c310131106e7c2882f849915d",
+      "repoDigests": [
+        "docker.io/vectorim/element-web@sha256:149a9e54a4823295c65008d9b5d1adb4462ed953f49bf3b740efa8e0fc4bad9a",
+        "docker.io/vectorim/element-web@sha256:b0aa4b5a4fc1afaaff62e2dbd0c92d57e2b20724f3ccb2fef53aae949088c3d2"
+      ],
+      "selectedManifestDigest": "sha256:149a9e54a4823295c65008d9b5d1adb4462ed953f49bf3b740efa8e0fc4bad9a",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "erpnext",
+      "source": "https://github.com/frappe/erpnext/releases/tag/v15.124.3",
+      "reference": "docker.io/frappe/erpnext:v15.124.3",
+      "pinnedImage": "docker.io/frappe/erpnext@sha256:054c7c4ce1d27b6d8540b26e29884566dad9edaa1d181d1e6d2db2d7f472faa9",
+      "imageId": "4f81a4ebc448bd8a33890190146b5fe84b24ab5d9ad191793ec83f5e4ca0b78e",
+      "repoDigests": [
+        "docker.io/frappe/erpnext@sha256:02c7443608b6af7d088a512aba3a62ecafdba2346be853ddce577194f856af49",
+        "docker.io/frappe/erpnext@sha256:054c7c4ce1d27b6d8540b26e29884566dad9edaa1d181d1e6d2db2d7f472faa9"
+      ],
+      "selectedManifestDigest": "sha256:054c7c4ce1d27b6d8540b26e29884566dad9edaa1d181d1e6d2db2d7f472faa9",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "firefly-iii",
+      "source": "https://github.com/firefly-iii/firefly-iii/releases/tag/v6.7.9",
+      "reference": "docker.io/fireflyiii/core:version-6.7.9",
+      "pinnedImage": "docker.io/fireflyiii/core@sha256:321dc39c1d956aaf67d8adbfa48485190361d6d51640bafb9c029c48f296374d",
+      "imageId": "5cd7ce9e1d42357ee62b7220b3571af041ef8c2bcf553588a7fa4b83a995c8aa",
+      "repoDigests": [
+        "docker.io/fireflyiii/core@sha256:321dc39c1d956aaf67d8adbfa48485190361d6d51640bafb9c029c48f296374d",
+        "docker.io/fireflyiii/core@sha256:d51ab6a3a7b91a5c892441578e0da7f2935f84f36bd1151fc3833acc6e060871"
+      ],
+      "selectedManifestDigest": "sha256:321dc39c1d956aaf67d8adbfa48485190361d6d51640bafb9c029c48f296374d",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "forgejo",
+      "source": "https://codeberg.org/forgejo/forgejo/releases/tag/v17.0.1",
+      "reference": "codeberg.org/forgejo/forgejo:17.0.1",
+      "pinnedImage": "codeberg.org/forgejo/forgejo@sha256:71e24559e54061ee85a23bfbbc0902e191c9d5f99e5b301fb4a7b89962660a95",
+      "imageId": "b5ae2a0d5d9abdf9a4ac005f65d8971068789d4f5e19a3b8b541e26e8d8a3c0f",
+      "repoDigests": [
+        "codeberg.org/forgejo/forgejo@sha256:71e24559e54061ee85a23bfbbc0902e191c9d5f99e5b301fb4a7b89962660a95",
+        "codeberg.org/forgejo/forgejo@sha256:fcd19ff4ebc85fb098a67e8e1d0d5a84d07dd6e8a23edcfdfd5b71a6178953be"
+      ],
+      "selectedManifestDigest": "sha256:71e24559e54061ee85a23bfbbc0902e191c9d5f99e5b301fb4a7b89962660a95",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "grafana",
+      "source": "https://github.com/grafana/grafana/releases/tag/v13.3.0",
+      "reference": "docker.io/grafana/grafana:13.3.0",
+      "pinnedImage": "docker.io/grafana/grafana@sha256:6e5d306338670f381a942f1c50d3c266bf71531e5ddd9ee4fc1a133dac5ce63d",
+      "imageId": "6afa1ab7f6e662c739a45a1d458598d7eb6ab70fc7c0ab45af64864e1503d4b6",
+      "repoDigests": [
+        "docker.io/grafana/grafana@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205",
+        "docker.io/grafana/grafana@sha256:6e5d306338670f381a942f1c50d3c266bf71531e5ddd9ee4fc1a133dac5ce63d"
+      ],
+      "selectedManifestDigest": "sha256:6e5d306338670f381a942f1c50d3c266bf71531e5ddd9ee4fc1a133dac5ce63d",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "homeassistant",
+      "source": "https://github.com/home-assistant/core/releases/tag/2026.10.4",
+      "reference": "ghcr.io/home-assistant/home-assistant:2026.10.4",
+      "pinnedImage": "ghcr.io/home-assistant/home-assistant@sha256:21935614df6d9f24f680a1ef749f0570d2d6b7936c606c0a44253ae875865c04",
+      "imageId": "8e7d93e48bed8980ec6924f8620928efa3bf981e3d33aa3be047944f37c6cd3a",
+      "repoDigests": [
+        "ghcr.io/home-assistant/home-assistant@sha256:21935614df6d9f24f680a1ef749f0570d2d6b7936c606c0a44253ae875865c04",
+        "ghcr.io/home-assistant/home-assistant@sha256:23f4dfbb69ce76315dbc4de7915504f1c2dcecd7ca2648113a493a385972e133"
+      ],
+      "selectedManifestDigest": "sha256:21935614df6d9f24f680a1ef749f0570d2d6b7936c606c0a44253ae875865c04",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "huly-account",
+      "source": "https://github.com/hcengineering/platform/releases/tag/v0.7.426",
+      "reference": "docker.io/hardcoreeng/account:v0.7.426",
+      "pinnedImage": "docker.io/hardcoreeng/account@sha256:8c96d08f0a095269fe6d730132facffdd08a21d186fba51f38296fac5aade02d",
+      "imageId": "bfabb94af47cfbd196a6531b5caee54bdcb0354aa06c639082c65165c2a196c1",
+      "repoDigests": [
+        "docker.io/hardcoreeng/account@sha256:8c96d08f0a095269fe6d730132facffdd08a21d186fba51f38296fac5aade02d",
+        "docker.io/hardcoreeng/account@sha256:a77b42617b7c88e886458966c0001952c22f882feb44f78e9f6f8d89d7e73c1c"
+      ],
+      "selectedManifestDigest": "sha256:8c96d08f0a095269fe6d730132facffdd08a21d186fba51f38296fac5aade02d",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "huly-cockroach",
+      "source": "https://github.com/hcengineering/huly-selfhost/blob/main/compose.yml",
+      "reference": "docker.io/cockroachdb/cockroach:v24.2.10",
+      "pinnedImage": "docker.io/cockroachdb/cockroach@sha256:0c51408b200d2a2ca639d8ecbb25e94f1c43d761a38f5b0cc4fb43ac4cc271d6",
+      "imageId": "131fbfa9713000f7e30f2d53ca68dbac606fd6aceb2e88e486b6da6f638c043b",
+      "repoDigests": [
+        "docker.io/cockroachdb/cockroach@sha256:0c51408b200d2a2ca639d8ecbb25e94f1c43d761a38f5b0cc4fb43ac4cc271d6",
+        "docker.io/cockroachdb/cockroach@sha256:885d9b0e3243f262976763717e547dbbe75ca999548f7a4ea95fcd30a9aee66c"
+      ],
+      "selectedManifestDigest": "sha256:0c51408b200d2a2ca639d8ecbb25e94f1c43d761a38f5b0cc4fb43ac4cc271d6",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "huly-collaborator",
+      "source": "https://github.com/hcengineering/platform/releases/tag/v0.7.426",
+      "reference": "docker.io/hardcoreeng/collaborator:v0.7.426",
+      "pinnedImage": "docker.io/hardcoreeng/collaborator@sha256:9575933205e41bcc1d860e49c09e4e3ad5196f7787e9b45cf656ba64a4079ce2",
+      "imageId": "f078ab0d5de1e36a1b76b5c5381b5dc237ae3bbf8bede0ddf895c8b16a55187b",
+      "repoDigests": [
+        "docker.io/hardcoreeng/collaborator@sha256:2747295c2cf5de05d6ea8ec90173891f28ede3064d45354a8069ebfe769f279f",
+        "docker.io/hardcoreeng/collaborator@sha256:9575933205e41bcc1d860e49c09e4e3ad5196f7787e9b45cf656ba64a4079ce2"
+      ],
+      "selectedManifestDigest": "sha256:9575933205e41bcc1d860e49c09e4e3ad5196f7787e9b45cf656ba64a4079ce2",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "huly-elasticsearch",
+      "source": "https://github.com/hcengineering/huly-selfhost/blob/main/compose.yml",
+      "reference": "docker.io/library/elasticsearch:7.14.2",
+      "pinnedImage": "docker.io/library/elasticsearch@sha256:55a0901f558968fb615d25032fdbeb9c6dd112d8ead05b830b1da4326e2f482b",
+      "imageId": "2abd5342ace0faddbf87836d7d1fbb201dada20a6ca09a3dbf3cb6f4637f45fb",
+      "repoDigests": [
+        "docker.io/library/elasticsearch@sha256:55a0901f558968fb615d25032fdbeb9c6dd112d8ead05b830b1da4326e2f482b",
+        "docker.io/library/elasticsearch@sha256:f05ab7f4d2aa5040813a0ea4eb76fa99bb31459937a4539efe2f2c2dbb2109fb"
+      ],
+      "selectedManifestDigest": "sha256:55a0901f558968fb615d25032fdbeb9c6dd112d8ead05b830b1da4326e2f482b",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "huly-front",
+      "source": "https://github.com/hcengineering/platform/releases/tag/v0.7.426",
+      "reference": "docker.io/hardcoreeng/front:v0.7.426",
+      "pinnedImage": "docker.io/hardcoreeng/front@sha256:9b8f9ea2b5e0849276deace824db87d83c3d9df888f428241748d977e4846ad8",
+      "imageId": "15f96adf1946038ff47439e7be1f4edd073187aea6c175d244b148fc959cb876",
+      "repoDigests": [
+        "docker.io/hardcoreeng/front@sha256:96d5270cb1f46cbe2d67a9cee79a83f184bbf5b6daf02ee8e2cbbb2522ce759f",
+        "docker.io/hardcoreeng/front@sha256:9b8f9ea2b5e0849276deace824db87d83c3d9df888f428241748d977e4846ad8"
+      ],
+      "selectedManifestDigest": "sha256:9b8f9ea2b5e0849276deace824db87d83c3d9df888f428241748d977e4846ad8",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "huly-fulltext",
+      "source": "https://github.com/hcengineering/platform/releases/tag/v0.7.426",
+      "reference": "docker.io/hardcoreeng/fulltext:v0.7.426",
+      "pinnedImage": "docker.io/hardcoreeng/fulltext@sha256:33cfeadcd138672bcd7ce3897d6c0ee5382e1970e85a14b64f30d7ecf4d605f7",
+      "imageId": "fe5966e8148b4a443cd60c1cecbb680149b6c7a676632c453f2b3c36fd7dbd61",
+      "repoDigests": [
+        "docker.io/hardcoreeng/fulltext@sha256:33cfeadcd138672bcd7ce3897d6c0ee5382e1970e85a14b64f30d7ecf4d605f7",
+        "docker.io/hardcoreeng/fulltext@sha256:e8670c41aab79b0e4e15230aad61e2e7e886e57cc83796e92ecb3c4d1f99209a"
+      ],
+      "selectedManifestDigest": "sha256:33cfeadcd138672bcd7ce3897d6c0ee5382e1970e85a14b64f30d7ecf4d605f7",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "huly-kvs",
+      "source": "https://github.com/hcengineering/platform/releases/tag/v0.7.426",
+      "reference": "docker.io/hardcoreeng/hulykvs:v0.7.426",
+      "pinnedImage": "docker.io/hardcoreeng/hulykvs@sha256:73f268e2f42ab9c41b805b574d9ab583cfab063e7d7573df450b00ebb895ff7e",
+      "imageId": "24ecb4aa937171955b0deb357e0380870858bc66787da3ad3a68840f7bd3df1a",
+      "repoDigests": [
+        "docker.io/hardcoreeng/hulykvs@sha256:73f268e2f42ab9c41b805b574d9ab583cfab063e7d7573df450b00ebb895ff7e",
+        "docker.io/hardcoreeng/hulykvs@sha256:765ca15bb643e4f8d42dba9bc0bf0d0e668ee5ced8fb1c432abb142946b09d4f"
+      ],
+      "selectedManifestDigest": "sha256:73f268e2f42ab9c41b805b574d9ab583cfab063e7d7573df450b00ebb895ff7e",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "huly-objectstore",
+      "source": "https://github.com/hcengineering/huly-selfhost/blob/main/compose.yml",
+      "reference": "docker.io/pgsty/silo:RELEASE.2026-10-26T00-00-00Z",
+      "pinnedImage": "docker.io/pgsty/silo@sha256:003925ecebdcd659494621de84984f20aac2ca0ce88684ba23bb1e38b8e0db3c",
+      "imageId": "43b7367262b22f39522b1ea41a1cf643c130e76210ef75a0dc41c6fa97d2fb20",
+      "repoDigests": [
+        "docker.io/pgsty/silo@sha256:003925ecebdcd659494621de84984f20aac2ca0ce88684ba23bb1e38b8e0db3c",
+        "docker.io/pgsty/silo@sha256:7bb2aff6b89efe1cb1303c10fc21d579447434ed06649ac9ec05a5e2dbf30ad7"
+      ],
+      "selectedManifestDigest": "sha256:003925ecebdcd659494621de84984f20aac2ca0ce88684ba23bb1e38b8e0db3c",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "huly-redpanda",
+      "source": "https://github.com/hcengineering/huly-selfhost/blob/main/compose.yml",
+      "reference": "docker.io/redpandadata/redpanda:v24.3.6",
+      "pinnedImage": "docker.io/redpandadata/redpanda@sha256:506a2ac8ac0dd2eaf3b15d25c22e1c792b3e1cf04c01a88186099870e0b76529",
+      "imageId": "741622f357002ac876b730f6bf9ae64a36800caf3ead30eddfc74c1fec5fbaed",
+      "repoDigests": [
+        "docker.io/redpandadata/redpanda@sha256:04baa40ed34edf86028396f762be802f3b6b0acaab65e9de696a3f15d54c550f",
+        "docker.io/redpandadata/redpanda@sha256:506a2ac8ac0dd2eaf3b15d25c22e1c792b3e1cf04c01a88186099870e0b76529"
+      ],
+      "selectedManifestDigest": "sha256:506a2ac8ac0dd2eaf3b15d25c22e1c792b3e1cf04c01a88186099870e0b76529",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "huly-rekoni",
+      "source": "https://github.com/hcengineering/platform/releases/tag/v0.7.426",
+      "reference": "docker.io/hardcoreeng/rekoni-service:v0.7.426",
+      "pinnedImage": "docker.io/hardcoreeng/rekoni-service@sha256:625613fc0e49edcc7da9e51df31913807802c81ba5cf9301bc65e94cfad173b8",
+      "imageId": "ae1a5f3030b70e5ca6d19b5af690764ac9c3556eaf1e2648624e9e3e7e684c7b",
+      "repoDigests": [
+        "docker.io/hardcoreeng/rekoni-service@sha256:625613fc0e49edcc7da9e51df31913807802c81ba5cf9301bc65e94cfad173b8",
+        "docker.io/hardcoreeng/rekoni-service@sha256:d148cefc5e55372a4d5d513626136618f814ee341eff1be9deffbeb74c8b5fed"
+      ],
+      "selectedManifestDigest": "sha256:625613fc0e49edcc7da9e51df31913807802c81ba5cf9301bc65e94cfad173b8",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "huly-stats",
+      "source": "https://github.com/hcengineering/platform/releases/tag/v0.7.426",
+      "reference": "docker.io/hardcoreeng/stats:v0.7.426",
+      "pinnedImage": "docker.io/hardcoreeng/stats@sha256:0c625f914c9d39d345cc2ca4e737b982aa26cc6e34e8e63c51a442a02da8ef58",
+      "imageId": "24400452a347ecd7618fd466e9d497c5fedd7bb6874f3b557550a17f512525ec",
+      "repoDigests": [
+        "docker.io/hardcoreeng/stats@sha256:0c625f914c9d39d345cc2ca4e737b982aa26cc6e34e8e63c51a442a02da8ef58",
+        "docker.io/hardcoreeng/stats@sha256:9a08a6ec7f80e13d3d3694247087751727227152bb23fdc88f53f8fae1a07183"
+      ],
+      "selectedManifestDigest": "sha256:0c625f914c9d39d345cc2ca4e737b982aa26cc6e34e8e63c51a442a02da8ef58",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "huly-transactor",
+      "source": "https://github.com/hcengineering/platform/releases/tag/v0.7.426",
+      "reference": "docker.io/hardcoreeng/transactor:v0.7.426",
+      "pinnedImage": "docker.io/hardcoreeng/transactor@sha256:4a746239ae682213a9fe84e1c0300d263edf1f6727ddcb29aba5f34ec6a9b5e8",
+      "imageId": "a7760a9e2c4e39b8e4ed2e7a29006f98d08d7a177af40cc185469c2f19786282",
+      "repoDigests": [
+        "docker.io/hardcoreeng/transactor@sha256:4a746239ae682213a9fe84e1c0300d263edf1f6727ddcb29aba5f34ec6a9b5e8",
+        "docker.io/hardcoreeng/transactor@sha256:4bbf156ff7ba06c665930d40bb577f6b549d1f9eeaa7270de5d98ac7fdd7465c"
+      ],
+      "selectedManifestDigest": "sha256:4a746239ae682213a9fe84e1c0300d263edf1f6727ddcb29aba5f34ec6a9b5e8",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "huly-workspace",
+      "source": "https://github.com/hcengineering/platform/releases/tag/v0.7.426",
+      "reference": "docker.io/hardcoreeng/workspace:v0.7.426",
+      "pinnedImage": "docker.io/hardcoreeng/workspace@sha256:564ff792c3c5eae330f1baeed02339c0bb9a6795491e2e1e93a27e951f69476e",
+      "imageId": "3f319f111b7d4c23bbb661e4c284ab3bea09925984ed69995956ea67f6fdd6d4",
+      "repoDigests": [
+        "docker.io/hardcoreeng/workspace@sha256:564ff792c3c5eae330f1baeed02339c0bb9a6795491e2e1e93a27e951f69476e",
+        "docker.io/hardcoreeng/workspace@sha256:9a95e4fc7616fb427111400191a9cff42e5e8e56c893c61bfa15055b1bfadb53"
+      ],
+      "selectedManifestDigest": "sha256:564ff792c3c5eae330f1baeed02339c0bb9a6795491e2e1e93a27e951f69476e",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "java-runtime",
+      "source": "https://hub.docker.com/_/eclipse-temurin",
+      "reference": "docker.io/library/eclipse-temurin:21.0.13_9-jre-noble",
+      "pinnedImage": "docker.io/library/eclipse-temurin@sha256:db724162e4ff5f71fa0a2815026314d9e5e0e9a139f49be1d4717e6930e93341",
+      "imageId": "4291fbae5ec045e2801c51b7db0b75e4371f04b385f124561068384c465bcd67",
+      "repoDigests": [
+        "docker.io/library/eclipse-temurin@sha256:03fedab2c0d7355868b5ba5330d64088b956a0bfac48f904e5c57207e261e2c9",
+        "docker.io/library/eclipse-temurin@sha256:db724162e4ff5f71fa0a2815026314d9e5e0e9a139f49be1d4717e6930e93341"
+      ],
+      "selectedManifestDigest": "sha256:db724162e4ff5f71fa0a2815026314d9e5e0e9a139f49be1d4717e6930e93341",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "jellyfin",
+      "source": "https://github.com/jellyfin/jellyfin/releases/tag/v12.4",
+      "reference": "docker.io/jellyfin/jellyfin:12.4",
+      "pinnedImage": "docker.io/jellyfin/jellyfin@sha256:7da5184caa38c553f219f6772476540081f392a68049e2b68c923f6daf877f8e",
+      "imageId": "995797bf87597b4247190e0034827f7887b34e75a4f603374591eab4f44172cb",
+      "repoDigests": [
+        "docker.io/jellyfin/jellyfin@sha256:7da5184caa38c553f219f6772476540081f392a68049e2b68c923f6daf877f8e",
+        "docker.io/jellyfin/jellyfin@sha256:fea863d0cd9ec445985d9c75fc6ed64e38a1d2766cf0c250a33d553f4fc1b771"
+      ],
+      "selectedManifestDigest": "sha256:7da5184caa38c553f219f6772476540081f392a68049e2b68c923f6daf877f8e",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "jupyter-notebook",
+      "source": "https://quay.io/repository/jupyter/base-notebook?tab=tags",
+      "reference": "quay.io/jupyter/base-notebook:hub-6.1.1",
+      "pinnedImage": "quay.io/jupyter/base-notebook@sha256:fddc6a64838e4616cef65ea31bcd41e49d9edcbad01d841135b53b3513649b71",
+      "imageId": "c3b72b81e090326bba44fd9ec4229941aa07050c67d12b00f8558cd2b5096463",
+      "repoDigests": [
+        "quay.io/jupyter/base-notebook@sha256:e7e1d8727cdca641ae97c4aa96afafc21b85eb8908da1a0dafa7ddb00c8e1554",
+        "quay.io/jupyter/base-notebook@sha256:fddc6a64838e4616cef65ea31bcd41e49d9edcbad01d841135b53b3513649b71"
+      ],
+      "selectedManifestDigest": "sha256:fddc6a64838e4616cef65ea31bcd41e49d9edcbad01d841135b53b3513649b71",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "jupyterhub",
+      "source": "https://github.com/jupyterhub/jupyterhub/tree/6.1.1",
+      "reference": "quay.io/jupyterhub/jupyterhub:6.1.1",
+      "pinnedImage": "quay.io/jupyterhub/jupyterhub@sha256:f669aa09ac72264227e2be9e40ce149cc3ac0ca19cf7c04fc157b3b4105a96cc",
+      "imageId": "aa55d9e11e14a4b1f33de16760d6135d21077da56a8dfb5436c98bd332a969b7",
+      "repoDigests": [
+        "quay.io/jupyterhub/jupyterhub@sha256:608dcd8f41ba1551f80f634c55c91c65737a59ccfa446b8cf98fd912f97204f8",
+        "quay.io/jupyterhub/jupyterhub@sha256:f669aa09ac72264227e2be9e40ce149cc3ac0ca19cf7c04fc157b3b4105a96cc"
+      ],
+      "selectedManifestDigest": "sha256:f669aa09ac72264227e2be9e40ce149cc3ac0ca19cf7c04fc157b3b4105a96cc",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "keycloak",
+      "source": "https://github.com/keycloak/keycloak/releases/tag/26.8.1",
+      "reference": "quay.io/keycloak/keycloak:26.8.1",
+      "pinnedImage": "quay.io/keycloak/keycloak@sha256:3e1ac632e743660017b1e6bb4c3ffc800fd02c82cdd0db858cd03456a98a8dfc",
+      "imageId": "b55801be6ce15109868bd056dc18d62d47106bfaad7ffbd1a5d804192ec98257",
+      "repoDigests": [
+        "quay.io/keycloak/keycloak@sha256:3e1ac632e743660017b1e6bb4c3ffc800fd02c82cdd0db858cd03456a98a8dfc",
+        "quay.io/keycloak/keycloak@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b"
+      ],
+      "selectedManifestDigest": "sha256:3e1ac632e743660017b1e6bb4c3ffc800fd02c82cdd0db858cd03456a98a8dfc",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "kopia",
+      "source": "https://github.com/kopia/kopia/releases/tag/v0.23.1",
+      "reference": "docker.io/kopia/kopia:0.23.1",
+      "pinnedImage": "docker.io/kopia/kopia@sha256:83d8bc7bce313dd8b2c17771b5f3f804e18e79ad7d7cc6bc994ff5872374794d",
+      "imageId": "3033ab0726ec64ff091d7f584f52987390e59eb7d30ca16bd36fcdc34c58ad96",
+      "repoDigests": [
+        "docker.io/kopia/kopia@sha256:83d8bc7bce313dd8b2c17771b5f3f804e18e79ad7d7cc6bc994ff5872374794d",
+        "docker.io/kopia/kopia@sha256:89fd95ee2942880ca00eae964266958a394421ddbdf69bca62e38afc55f5900e"
+      ],
+      "selectedManifestDigest": "sha256:83d8bc7bce313dd8b2c17771b5f3f804e18e79ad7d7cc6bc994ff5872374794d",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "livekit",
+      "source": "https://github.com/livekit/livekit/releases/tag/v1.13.11",
+      "reference": "docker.io/livekit/livekit-server:v1.13.11",
+      "pinnedImage": "docker.io/livekit/livekit-server@sha256:04668840140552c7e5d7faf28959cbf2256fb04ea641c4fd23ea69cbf3d7d105",
+      "imageId": "0e20c255a2c17000c52d0631b79737a4216c06bc51df13878768df01261c8dfd",
+      "repoDigests": [
+        "docker.io/livekit/livekit-server@sha256:04668840140552c7e5d7faf28959cbf2256fb04ea641c4fd23ea69cbf3d7d105",
+        "docker.io/livekit/livekit-server@sha256:25cd902de7cacbd5f1f779f6a6ac1eae20ba8f56b0935934ce6b0ab80d1e3d20"
+      ],
+      "selectedManifestDigest": "sha256:04668840140552c7e5d7faf28959cbf2256fb04ea641c4fd23ea69cbf3d7d105",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "loki",
+      "source": "https://github.com/grafana/loki/releases/tag/v3.7.9",
+      "reference": "docker.io/grafana/loki:3.7.9",
+      "pinnedImage": "docker.io/grafana/loki@sha256:569e5cab050b7705eb82080335ff9a8bd329650b358bb0d42131e3ced8d9492e",
+      "imageId": "5d47ead9b695cb22fb4851f09efd40ffd41db92278d847bdfafc25f9c5d654e7",
+      "repoDigests": [
+        "docker.io/grafana/loki@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28",
+        "docker.io/grafana/loki@sha256:569e5cab050b7705eb82080335ff9a8bd329650b358bb0d42131e3ced8d9492e"
+      ],
+      "selectedManifestDigest": "sha256:569e5cab050b7705eb82080335ff9a8bd329650b358bb0d42131e3ced8d9492e",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "mailserver",
+      "source": "https://github.com/docker-mailserver/docker-mailserver/releases/tag/v16.0.1",
+      "reference": "ghcr.io/docker-mailserver/docker-mailserver:16.0.1",
+      "pinnedImage": "ghcr.io/docker-mailserver/docker-mailserver@sha256:a69ddc47bbcd085a2a6f23fd31f371d54b2f8495f7266a7803a3e272e049556b",
+      "imageId": "4b35cb5d547b3cb7e2de20ce5c0687f4f4bd3694665277dda319246be115b527",
+      "repoDigests": [
+        "ghcr.io/docker-mailserver/docker-mailserver@sha256:a69ddc47bbcd085a2a6f23fd31f371d54b2f8495f7266a7803a3e272e049556b",
+        "ghcr.io/docker-mailserver/docker-mailserver@sha256:d0fe7668defe157aad57ea31b1707ad1e2fb57d7a91bdf17cbdf876549946c86"
+      ],
+      "selectedManifestDigest": "sha256:a69ddc47bbcd085a2a6f23fd31f371d54b2f8495f7266a7803a3e272e049556b",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "mariadb",
+      "source": "https://hub.docker.com/_/mariadb",
+      "reference": "docker.io/library/mariadb:10.11.19-jammy",
+      "pinnedImage": "docker.io/library/mariadb@sha256:6c65a843396dc6c78dd0da19eccaa0a91d25d9d26a4c2afcb75010ac3f59f5ea",
+      "imageId": "72b6ab51626b71b6118295b90c9408e537ff1cfdaa0b35c9930e8c2ee49a47bf",
+      "repoDigests": [
+        "docker.io/library/mariadb@sha256:6c65a843396dc6c78dd0da19eccaa0a91d25d9d26a4c2afcb75010ac3f59f5ea",
+        "docker.io/library/mariadb@sha256:d769e37960821dfdcf096954f6e7ac89f747e116c1bba98e48edd265dfc7deae"
+      ],
+      "selectedManifestDigest": "sha256:6c65a843396dc6c78dd0da19eccaa0a91d25d9d26a4c2afcb75010ac3f59f5ea",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "mastodon-streaming",
+      "source": "https://github.com/mastodon/mastodon/blob/v4.7.4/docker-compose.yml",
+      "reference": "ghcr.io/mastodon/mastodon-streaming:v4.7.4",
+      "pinnedImage": "ghcr.io/mastodon/mastodon-streaming@sha256:bab70538442bc9641805e1b68a2bc86047b7ac903edbe3a389bd569e73b0eab8",
+      "imageId": "26adaeaa395276bb6c4e9ccd2272f6b6931c07dbfe578cfe003731b59779fbe3",
+      "repoDigests": [
+        "ghcr.io/mastodon/mastodon-streaming@sha256:b896be8bc93db513695c3ebac8442c09453065ab1be06dfc49fe3c16a91c825c",
+        "ghcr.io/mastodon/mastodon-streaming@sha256:bab70538442bc9641805e1b68a2bc86047b7ac903edbe3a389bd569e73b0eab8"
+      ],
+      "selectedManifestDigest": "sha256:bab70538442bc9641805e1b68a2bc86047b7ac903edbe3a389bd569e73b0eab8",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "mastodon",
+      "source": "https://github.com/mastodon/mastodon/blob/v4.7.4/docker-compose.yml",
+      "reference": "ghcr.io/mastodon/mastodon:v4.7.4",
+      "pinnedImage": "ghcr.io/mastodon/mastodon@sha256:efd8d960dcc0816085f825e37f9550127dbe31bc9249b1481a8b5d2a82662acb",
+      "imageId": "2083b54cd282106b35ff834b69e90a3ec26472071ced83b0ac8e74f570717ea0",
+      "repoDigests": [
+        "ghcr.io/mastodon/mastodon@sha256:8cbc9c9ffa595c4ced3854b63b8f173251be710f9bbf2d369926023c19666311",
+        "ghcr.io/mastodon/mastodon@sha256:efd8d960dcc0816085f825e37f9550127dbe31bc9249b1481a8b5d2a82662acb"
+      ],
+      "selectedManifestDigest": "sha256:efd8d960dcc0816085f825e37f9550127dbe31bc9249b1481a8b5d2a82662acb",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "matrix-authentication-service",
+      "source": "https://github.com/element-hq/matrix-authentication-service/releases/tag/v1.28.0",
+      "reference": "ghcr.io/element-hq/matrix-authentication-service:1.28.0",
+      "pinnedImage": "ghcr.io/element-hq/matrix-authentication-service@sha256:76948a9b065c9675a665a630bdfe03c842a2a040c327cfe613541cef3695218a",
+      "imageId": "ccb3b6b88c4f0218f26bfcbb6b6ed4311045e093b535ee6c192d64da0293f46e",
+      "repoDigests": [
+        "ghcr.io/element-hq/matrix-authentication-service@sha256:494c67f08ee8344368f4ed336611dea02b26c4e058bf37a212d090d50b612659",
+        "ghcr.io/element-hq/matrix-authentication-service@sha256:76948a9b065c9675a665a630bdfe03c842a2a040c327cfe613541cef3695218a"
+      ],
+      "selectedManifestDigest": "sha256:76948a9b065c9675a665a630bdfe03c842a2a040c327cfe613541cef3695218a",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "matrix-rtc-authorizer",
+      "source": "https://github.com/element-hq/lk-jwt-service/releases/tag/v0.9.0",
+      "reference": "ghcr.io/element-hq/lk-jwt-service:0.9.0",
+      "pinnedImage": "ghcr.io/element-hq/lk-jwt-service@sha256:2c985ab98de8da3b101c09fb597404dcb2723bb984b1ee20a430a8bb4f6a51a9",
+      "imageId": "c3d6c7b8d255b625f7320a5ebdb693ff68d8ed46c6def5e78eee83a911e8c3ad",
+      "repoDigests": [
+        "ghcr.io/element-hq/lk-jwt-service@sha256:2c985ab98de8da3b101c09fb597404dcb2723bb984b1ee20a430a8bb4f6a51a9",
+        "ghcr.io/element-hq/lk-jwt-service@sha256:d210fd778ba38b7e42e6fc64e8a24a7d66ccc3b938fb20d73bd713224af2dfea"
+      ],
+      "selectedManifestDigest": "sha256:2c985ab98de8da3b101c09fb597404dcb2723bb984b1ee20a430a8bb4f6a51a9",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "memcached",
+      "source": "https://hub.docker.com/_/memcached",
+      "reference": "docker.io/library/memcached:1.6.45-alpine",
+      "pinnedImage": "docker.io/library/memcached@sha256:9057793717e87e054636eaf06cf8ec2792a3ad164ad9e8bcae1e90241ea73fb0",
+      "imageId": "8f5eba4fb025850bd1df258f435078ef997189beef8f412662adfbb34f2a9212",
+      "repoDigests": [
+        "docker.io/library/memcached@sha256:6a089e37cbb8acd75c80c6c0667fe57ec54db68782fb1b3afb1d0eb265e50070",
+        "docker.io/library/memcached@sha256:9057793717e87e054636eaf06cf8ec2792a3ad164ad9e8bcae1e90241ea73fb0"
+      ],
+      "selectedManifestDigest": "sha256:9057793717e87e054636eaf06cf8ec2792a3ad164ad9e8bcae1e90241ea73fb0",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "node-exporter",
+      "source": "https://github.com/prometheus/node_exporter/releases/tag/v1.12.1",
+      "reference": "quay.io/prometheus/node-exporter:v1.12.1",
+      "pinnedImage": "quay.io/prometheus/node-exporter@sha256:da83fae85603c4e47e6c68369a7d746e2dda683dc35ea2e234b4f171e0d92798",
+      "imageId": "9bbbca8f5cb8e9bd1b835e8ec086b6df6d9a458d2d10ef1c97ea4a9a3ae7e54b",
+      "repoDigests": [
+        "quay.io/prometheus/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0",
+        "quay.io/prometheus/node-exporter@sha256:da83fae85603c4e47e6c68369a7d746e2dda683dc35ea2e234b4f171e0d92798"
+      ],
+      "selectedManifestDigest": "sha256:da83fae85603c4e47e6c68369a7d746e2dda683dc35ea2e234b4f171e0d92798",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "ntfy",
+      "source": "https://github.com/binwiederhier/ntfy/releases/tag/v2.35.0",
+      "reference": "docker.io/binwiederhier/ntfy:v2.35.0",
+      "pinnedImage": "docker.io/binwiederhier/ntfy@sha256:8a3e2036faf218acefd3c25b16659e846df39814d2e3caae1a1ac4e737ee4f2d",
+      "imageId": "a080fe345c08dd54faeb5a8121c035e74a823f111cf9209bd228b886474e15b7",
+      "repoDigests": [
+        "docker.io/binwiederhier/ntfy@sha256:6f0c9abab7b99a978d816611cc90dabb4849b81f60c53114e91cd07931085dc0",
+        "docker.io/binwiederhier/ntfy@sha256:8a3e2036faf218acefd3c25b16659e846df39814d2e3caae1a1ac4e737ee4f2d"
+      ],
+      "selectedManifestDigest": "sha256:8a3e2036faf218acefd3c25b16659e846df39814d2e3caae1a1ac4e737ee4f2d",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "onlyoffice",
+      "source": "https://github.com/ONLYOFFICE/DocumentServer/releases/tag/v10.0.0",
+      "reference": "docker.io/onlyoffice/documentserver:10.0.0",
+      "pinnedImage": "docker.io/onlyoffice/documentserver@sha256:bff1a9fd46f2b79ada776fd0447c3fccf66cbf44c1996ec9316efa8ac4ee3fd5",
+      "imageId": "82ba611d7112e642a06c900d6a6ba652f852a21db90ba6524516ed85ebdf655d",
+      "repoDigests": [
+        "docker.io/onlyoffice/documentserver@sha256:bff1a9fd46f2b79ada776fd0447c3fccf66cbf44c1996ec9316efa8ac4ee3fd5",
+        "docker.io/onlyoffice/documentserver@sha256:ca17889f10b11141cc6441836aebdd2835cf3e1b49681b2fd6e155c94b7850b3"
+      ],
+      "selectedManifestDigest": "sha256:bff1a9fd46f2b79ada776fd0447c3fccf66cbf44c1996ec9316efa8ac4ee3fd5",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "openbao",
+      "source": "https://github.com/openbao/openbao/releases/tag/v2.7.2",
+      "reference": "quay.io/openbao/openbao:2.7.2",
+      "pinnedImage": "quay.io/openbao/openbao@sha256:a78eb12a9fc7a3ebb4bec1724e2bdd6a28e33394820641d061166919a3f1866b",
+      "imageId": "9089bc6d4aac6d69317f2faf7935135a6b48f949565b03c08677a7f15ff2454f",
+      "repoDigests": [
+        "quay.io/openbao/openbao@sha256:5046911075e137e154ce49ab051502f4ec7cf367d484ae4a4dce665d9b90561f",
+        "quay.io/openbao/openbao@sha256:a78eb12a9fc7a3ebb4bec1724e2bdd6a28e33394820641d061166919a3f1866b"
+      ],
+      "selectedManifestDigest": "sha256:a78eb12a9fc7a3ebb4bec1724e2bdd6a28e33394820641d061166919a3f1866b",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "opensearch",
+      "source": "https://github.com/opensearch-project/OpenSearch/releases/tag/3.9.0",
+      "reference": "docker.io/opensearchproject/opensearch:3.9.0",
+      "pinnedImage": "docker.io/opensearchproject/opensearch@sha256:5c20af6b5cb472a74ba99f663bee3dd03afbeced14b3897b220a87fc75278445",
+      "imageId": "f546dde21473d6d15f4fe4e76e10a5da3fc09f6a0799721642344f9abab0737d",
+      "repoDigests": [
+        "docker.io/opensearchproject/opensearch@sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e",
+        "docker.io/opensearchproject/opensearch@sha256:5c20af6b5cb472a74ba99f663bee3dd03afbeced14b3897b220a87fc75278445"
+      ],
+      "selectedManifestDigest": "sha256:5c20af6b5cb472a74ba99f663bee3dd03afbeced14b3897b220a87fc75278445",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "planka",
+      "source": "https://github.com/plankanban/planka/releases/tag/v2.2.1",
+      "reference": "ghcr.io/plankanban/planka:2.2.1",
+      "pinnedImage": "ghcr.io/plankanban/planka@sha256:38c77855d1744be811d5c922124665d02b60e47306e39cccc1d6f21dbeb38eec",
+      "imageId": "617b4a16f07c3ea5d4fa2ede6e36ff9cffcbd65cffe5f6fc51a452e251a484f5",
+      "repoDigests": [
+        "ghcr.io/plankanban/planka@sha256:125f45330853210c678fed1132bedc0912b4a11a27779b79802fbca108e069e2",
+        "ghcr.io/plankanban/planka@sha256:38c77855d1744be811d5c922124665d02b60e47306e39cccc1d6f21dbeb38eec"
+      ],
+      "selectedManifestDigest": "sha256:38c77855d1744be811d5c922124665d02b60e47306e39cccc1d6f21dbeb38eec",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "postgres",
+      "source": "https://hub.docker.com/_/postgres",
+      "reference": "docker.io/library/postgres:17.11-bookworm",
+      "pinnedImage": "docker.io/library/postgres@sha256:2cd2c0f809604aaeff6f0ec8f40aecbd025613107561015c69369a1a7f1d3416",
+      "imageId": "99445113a4a19e82dd3713c65bd9f6fb5bf972065ab043df8d1e1c93e957da9a",
+      "repoDigests": [
+        "docker.io/library/postgres@sha256:2cd2c0f809604aaeff6f0ec8f40aecbd025613107561015c69369a1a7f1d3416",
+        "docker.io/library/postgres@sha256:839fbb5a4942a7758dd93e18b42ea5649807491a0545b5eeeb8f0b8bb11857a5"
+      ],
+      "selectedManifestDigest": "sha256:2cd2c0f809604aaeff6f0ec8f40aecbd025613107561015c69369a1a7f1d3416",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "prometheus",
+      "source": "https://github.com/prometheus/prometheus/releases/tag/v3.15.1",
+      "reference": "quay.io/prometheus/prometheus:v3.15.1",
+      "pinnedImage": "quay.io/prometheus/prometheus@sha256:d445d1806b38f85b5c394a1b87f94113fde0473b45245922c2e8b1bd41fa68ae",
+      "imageId": "876ae6bcb0d6c9190d799e82c996fbe5faecdaaa0ec84f5e7dd272c0542ea63c",
+      "repoDigests": [
+        "quay.io/prometheus/prometheus@sha256:d445d1806b38f85b5c394a1b87f94113fde0473b45245922c2e8b1bd41fa68ae",
+        "quay.io/prometheus/prometheus@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2"
+      ],
+      "selectedManifestDigest": "sha256:d445d1806b38f85b5c394a1b87f94113fde0473b45245922c2e8b1bd41fa68ae",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "qbittorrent",
+      "source": "https://github.com/linuxserver/docker-qbittorrent/releases/tag/5.3.0_v2.1.2-ls485",
+      "reference": "lscr.io/linuxserver/qbittorrent:5.3.0_v2.1.2-ls485",
+      "pinnedImage": "lscr.io/linuxserver/qbittorrent@sha256:236a7a3a81a3706182ae1f12ee55aa3781c753963e680b2d9c8e55541686d0ce",
+      "imageId": "d4f0b8622da58717c2baa61cc05e3d597b72032121a2cba9af29f0e334461346",
+      "repoDigests": [
+        "lscr.io/linuxserver/qbittorrent@sha256:236a7a3a81a3706182ae1f12ee55aa3781c753963e680b2d9c8e55541686d0ce",
+        "lscr.io/linuxserver/qbittorrent@sha256:75ecbb1c89ab7b0a21c4bde40b4820e4f1649d2d56d83b91913422155e8d2a5f"
+      ],
+      "selectedManifestDigest": "sha256:236a7a3a81a3706182ae1f12ee55aa3781c753963e680b2d9c8e55541686d0ce",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "seafile",
+      "source": "https://hub.docker.com/r/seafileltd/seafile-mc/tags",
+      "reference": "docker.io/seafileltd/seafile-mc:13.0.28",
+      "pinnedImage": "docker.io/seafileltd/seafile-mc@sha256:d8880d888d318b402591e64576e43c322d78d00e51d18c07aaa4fa8125571582",
+      "imageId": "d3b8f07584d05a6cc1443bb86b48f916b452bbd49b0d6fea9f127fcf354bb490",
+      "repoDigests": [
+        "docker.io/seafileltd/seafile-mc@sha256:b0c90832126bf432db908449f1bb450211e6bbf75a2193bab3399e2a9636eccf",
+        "docker.io/seafileltd/seafile-mc@sha256:d8880d888d318b402591e64576e43c322d78d00e51d18c07aaa4fa8125571582"
+      ],
+      "selectedManifestDigest": "sha256:d8880d888d318b402591e64576e43c322d78d00e51d18c07aaa4fa8125571582",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "searxng",
+      "source": "https://hub.docker.com/r/searxng/searxng/tags",
+      "reference": "docker.io/searxng/searxng:2026.10.30-ffa88e3ba",
+      "pinnedImage": "docker.io/searxng/searxng@sha256:e2ee9d55b73ce5b531b3d7b9aca3578c7517b3762a2a6153bee28b2645dda51e",
+      "imageId": "f4be4b8a3b026d66d561b83fc345a9daa052933a48a770bd0250cf5364ad651b",
+      "repoDigests": [
+        "docker.io/searxng/searxng@sha256:e2ee9d55b73ce5b531b3d7b9aca3578c7517b3762a2a6153bee28b2645dda51e",
+        "docker.io/searxng/searxng@sha256:f4aa660c54d062dedb268be84e821ea24e39f48c7a496af8dd02cc9eedb93847"
+      ],
+      "selectedManifestDigest": "sha256:e2ee9d55b73ce5b531b3d7b9aca3578c7517b3762a2a6153bee28b2645dda51e",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "sogo",
+      "source": "https://github.com/sonroyaalmerol/docker-sogo/pkgs/container/docker-sogo",
+      "reference": "ghcr.io/sonroyaalmerol/docker-sogo:5.12.12-1",
+      "pinnedImage": "ghcr.io/sonroyaalmerol/docker-sogo@sha256:e707534377ba45814d9cb4208bd008184327e319605607c738318711c00c5b5a",
+      "imageId": "1ea5424f1fbcd03c6a72a47b7628c49ab8c1532b47d6d87161d92e68b8d16cb8",
+      "repoDigests": [
+        "ghcr.io/sonroyaalmerol/docker-sogo@sha256:62156835b4dd0225d95d3bcb777822ebcce0a251ba4b1367c33df955eee531a9",
+        "ghcr.io/sonroyaalmerol/docker-sogo@sha256:e707534377ba45814d9cb4208bd008184327e319605607c738318711c00c5b5a"
+      ],
+      "selectedManifestDigest": "sha256:e707534377ba45814d9cb4208bd008184327e319605607c738318711c00c5b5a",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "synapse",
+      "source": "https://github.com/element-hq/synapse/releases/tag/v1.164.1",
+      "reference": "ghcr.io/element-hq/synapse:v1.164.1",
+      "pinnedImage": "ghcr.io/element-hq/synapse@sha256:37405e72fb1537ddbf43536db5df652ea93dfba33a8c7088ab087ae834e2813f",
+      "imageId": "b2d38d6decacc092e0fee11e9f26efdb2045f2dd8cac0bcf41e5b50195c256b4",
+      "repoDigests": [
+        "ghcr.io/element-hq/synapse@sha256:37405e72fb1537ddbf43536db5df652ea93dfba33a8c7088ab087ae834e2813f",
+        "ghcr.io/element-hq/synapse@sha256:fa4aa980f279bcf26d4e7ecc2a2c9a701c73f2ebe8841da9bdcf3b2fdf693d75"
+      ],
+      "selectedManifestDigest": "sha256:37405e72fb1537ddbf43536db5df652ea93dfba33a8c7088ab087ae834e2813f",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "valkey",
+      "source": "https://github.com/valkey-io/valkey/releases/tag/7.2.15",
+      "reference": "docker.io/valkey/valkey:7.2.15-alpine",
+      "pinnedImage": "docker.io/valkey/valkey@sha256:a4d999bf67c51f2b4adef2667f2704ae8a7ada37e6e1eddd594044d8a2aac93f",
+      "imageId": "acfb305644a8fa9c07cf6d3a304e8ef90457bdc14e693f341adf7e2ee459bdf3",
+      "repoDigests": [
+        "docker.io/valkey/valkey@sha256:a4d999bf67c51f2b4adef2667f2704ae8a7ada37e6e1eddd594044d8a2aac93f",
+        "docker.io/valkey/valkey@sha256:f8c1a646f4b31ae4dc3980ff06723a20b533ea1123b9796d450d78ed53ad6d3e"
+      ],
+      "selectedManifestDigest": "sha256:a4d999bf67c51f2b4adef2667f2704ae8a7ada37e6e1eddd594044d8a2aac93f",
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  ]
+}

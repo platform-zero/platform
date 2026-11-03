@@ -1,0 +1,5 @@
+# High-port private ingress needs no capabilities. A normal copy retains the exact
+# upstream executable bytes but not its privileged security.capability xattr.
+FROM docker.io/library/caddy@sha256:04913b1da43339a40ad1ea87827d70a576ac5aa6cf674c6e24fdca675887533a
+RUN cp /usr/bin/caddy /usr/bin/caddy-unprivileged && cmp /usr/bin/caddy /usr/bin/caddy-unprivileged && mv /usr/bin/caddy-unprivileged /usr/bin/caddy
+USER 1000:1000

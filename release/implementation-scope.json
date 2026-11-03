@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "operator": "sole-operator",
+  "executionBoundary": "offline-compilation-and-unit-tests-only",
+  "domains": [
+    {
+      "id": "canonical-providers", "status": "source-present",
+      "targets": ["postgres", "mariadb", "valkey", "memcached", "ntfy"],
+      "sourceFiles": ["platform/src/main/kotlin/net/datamancy/platform/CanonicalTopology.kt", "platform/src/main/kotlin/net/datamancy/platform/CanonicalCoreRuntime.kt", "platform/src/main/kotlin/net/datamancy/platform/GenerationCapacityPlanner.kt"],
+      "interfaces": ["GenerationAssembly.canonicalPlan", "CanonicalTopology.compile", "CanonicalCoreRuntime.providersSpec", "CanonicalCoreRuntime.coldRestoreProvidersSpec"],
+      "blockers": ["complete provider-less application composition", "generation-bound host-component ownership and capacity", "native qualification fixture provisioning", "ntfy browser and Android workflows"]
+    },
+    {
+      "id": "transactions", "status": "source-present",
+      "targets": ["planka"],
+      "sourceFiles": ["platform/src/main/kotlin/net/datamancy/platform/ReleaseDispatch.kt", "platform/src/main/kotlin/net/datamancy/platform/ReleaseQualificationDispatch.kt", "platform/src/main/kotlin/net/datamancy/platform/OwnedReleaseUpdate.kt", "platform/src/main/kotlin/net/datamancy/platform/NativeReleaseControl.kt"],
+      "interfaces": ["ReleaseDispatch.execute", "ReleaseQualificationDispatch.finishAndAssess", "OwnedReleaseUpdates.compile", "PlankaMigration", "ReleaseTransaction.activate"],
+      "blockers": ["late-bound update request and native owned import", "lineage-bound migration and rollback", "restricted RESTORE ingress and managed-component startup", "reversible publication hold and active-site binding", "Planka browser adapter"]
+    },
+    {
+      "id": "recovery", "status": "source-present",
+      "targets": ["kopia", "backup-restore"],
+      "sourceFiles": ["platform/src/main/kotlin/net/datamancy/platform/FoundationRestore.kt", "platform/src/main/kotlin/net/datamancy/platform/RecoveryControllerPayloads.kt", "platform/src/main/kotlin/net/datamancy/platform/RecoveryReferences.kt", "platform/src/main/kotlin/net/datamancy/platform/WeeklyRestoreSchedule.kt"],
+      "interfaces": ["GenerationRuntime.restoreKopiaWholeRelease", "GenerationRuntime.holdKopiaForRestore", "GenerationRuntime.resumeHeldSourceAfterIsolation", "WeeklyRestoreSchedule.tick", "KopiaGenerationStore.bootstrapRepository"],
+      "blockers": ["all canonical and managed-component recovery projections", "bounded ACL xattr and link fidelity", "full-operation RSS exclusion and controller payload custody", "standalone controller bootstrap", "reference-writer closure and terminal reference retirement"]
+    },
+    {
+      "id": "identity", "status": "source-present",
+      "targets": ["keycloak", "keykeeper", "openbao", "identity-onboarding", "human-agent-authorization"],
+      "sourceFiles": ["platform/src/main/kotlin/net/datamancy/platform/IdentityRuntime.kt", "platform/scripts/identity_secrets.py", "platform/scripts/identity_recovery.py", "keykeeper/src/main/kotlin/net/datamancy/keykeeper/Vault.kt"],
+      "interfaces": ["IdentityRuntime.canonicalInputs", "Vault.rotate", "Vault.retire", "identity_secrets.py", "identity_recovery.verify_recovery"],
+      "blockers": ["all application clients and subject mapping", "consumer credential adoption and issuer retirement", "generation-bound custody integration", "missing identity and browser adapters"]
+    },
+    {
+      "id": "managed-lanes", "status": "source-present",
+      "targets": ["worklane", "tuios", "pi"],
+      "sourceFiles": ["worklane/worklane/src/managed_pi.rs", "worklane/worklane/src/tuios_live.rs", "worklane/Containerfile.v3"],
+      "interfaces": ["lane pi-credential", "lane pi-inspect"],
+      "blockers": ["canonical host lifecycle and recovery binding", "scoped credential broker and expiry enforcement", "restored window retirement and safe relaunch", "working settled hooks and uncertain tool evidence", "restore isolation observations"]
+    },
+    {
+      "id": "matrix-rtc", "status": "source-present",
+      "targets": ["synapse", "element", "matrix-authentication-service", "livekit"],
+      "sourceFiles": ["platform/src/main/kotlin/net/datamancy/platform/MatrixRtcRuntime.kt", "acceptance/runners/matrix_qualified.py"],
+      "interfaces": ["MatrixRtcRuntime.spec", "MatrixRtcRuntime.coldRestoreSpec"],
+      "blockers": ["shared provider composition", "approved-host OpenID and federation discovery", "qualified real-domain browser and Android adapters", "LiveKit and forced-TURN semantic adapters"]
+    },
+    {
+      "id": "files-collaboration", "status": "source-present",
+      "targets": ["seafile", "onlyoffice", "huly", "jupyterhub", "jupyter-notebook"],
+      "sourceFiles": ["platform/src/main/kotlin/net/datamancy/platform/SeafileRuntime.kt", "platform/src/main/kotlin/net/datamancy/platform/OfficeRuntime.kt", "platform/src/main/kotlin/net/datamancy/platform/HulyRuntime.kt", "platform/src/main/kotlin/net/datamancy/platform/JupyterHubRuntime.kt"],
+      "interfaces": ["SeafileRuntime.applicationSpec", "OfficeRuntime.applicationSpec", "JupyterHubRuntime.coldRestoreSpec"],
+      "blockers": ["provider TLS ACL composition and native identity lifecycle", "Huly broker and migration-safe recovery", "Office legacy callback ledger reconciliation", "Seafile sync conflict and Office two-user workflows", "Hub quotas and retirement", "missing qualified phases and client adapters"]
+    },
+    {
+      "id": "business-knowledge", "status": "source-present",
+      "targets": ["erpnext", "firefly-iii", "bookstack", "forgejo", "donetick"],
+      "sourceFiles": ["platform/src/main/kotlin/net/datamancy/platform/BusinessApplicationRecovery.kt", "platform/src/main/kotlin/net/datamancy/platform/FireflyCanonical.kt", "platform/src/main/kotlin/net/datamancy/platform/ErpNextRecovery.kt"],
+      "interfaces": ["BusinessApplicationRecovery.coldRestoreSpec", "FireflyCanonical.fragment", "ErpNextRecovery.prepare"],
+      "blockers": ["remaining provider-less composition", "qualified accounting import and authorization workflows", "browser Android and restore adapters"]
+    },
+    {
+      "id": "mail-social", "status": "source-present",
+      "targets": ["mailserver", "sogo", "mastodon"],
+      "sourceFiles": ["platform/src/main/kotlin/net/datamancy/platform/SogoMailRuntime.kt", "platform/src/main/kotlin/net/datamancy/platform/MastodonRuntime.kt", "acceptance/runners/mailserver-native.py"],
+      "interfaces": ["SogoMailRuntime", "MastodonRuntime", "mailserver-native.py"],
+      "blockers": ["canonical composition and identity retirement", "mail restore authority", "SOGo composition attachment and draft UI", "Mastodon native browser Android restore adapters"]
+    },
+    {
+      "id": "observability-home-security", "status": "source-present",
+      "targets": ["alertmanager", "alloy", "grafana", "loki", "prometheus", "node-exporter", "crowdsec", "homeassistant", "jellyfin", "qbittorrent", "searxng", "opensearch"],
+      "sourceFiles": ["platform/src/main/kotlin/net/datamancy/platform/ObservabilityRuntime.kt", "platform/src/main/kotlin/net/datamancy/platform/HomeAssistantRuntime.kt", "platform/src/main/resources/runtime/homeassistant-recovery-guard.py", "platform/src/main/kotlin/net/datamancy/platform/JellyfinRuntime.kt", "platform/src/main/kotlin/net/datamancy/platform/CrowdsecRuntime.kt"],
+      "interfaces": ["GenerationAssembly.catalog", "BusinessApplicationRecovery.coldRestoreSpec", "HomeAssistantRuntime.coldRestoreSpec"],
+      "blockers": ["complete canonical state identity and recovery contracts", "native semantic authorization restore workflows", "required browser Android and transitive artifact closure"]
+    },
+    {
+      "id": "ingress", "status": "source-present",
+      "targets": ["caddy"],
+      "sourceFiles": ["platform/src/main/kotlin/net/datamancy/platform/CaddyLifecycle.kt", "platform/src/main/kotlin/net/datamancy/platform/NamespaceCaddyTransport.kt", "platform/src/main/kotlin/net/datamancy/platform/ManagedPrivatePki.kt"],
+      "interfaces": ["CaddyLifecycle.execute", "ReleaseCaddyEndpoints.real", "TransactionalCaddy.inRuntime", "ManagedPrivatePki.renew"],
+      "blockers": ["exclusive listener succession and restricted restore client bridge", "managed CA adoption and consumer renewal", "bounded one-shot public renewal actuator"]
+    },
+    {
+      "id": "rss", "status": "source-present",
+      "targets": ["mastodon-rss-publisher", "rss-jobs", "rss-pack-analysis", "rss-pack-aus", "rss-pack-aus-state", "rss-pack-china", "rss-pack-china-state", "rss-pack-tas", "rss-pack-us", "rss-pack-us-state", "rss-pack-world"],
+      "sourceFiles": ["platform/src/main/kotlin/net/datamancy/platform/RssSchedule.kt", "platform/src/main/kotlin/net/datamancy/platform/RssMaintenance.kt", "platform/src/main/kotlin/net/datamancy/platform/RssStateStore.kt", "acceptance/runners/rss-pack-analysis-native.py"],
+      "interfaces": ["RssSchedule.quiesce", "RssSchedule.tick", "RssSchedule.reconcile"],
+      "blockers": ["sealed generation enrollment association", "full-operation backup and restore exclusion", "publisher and jobs native POST lost-ack harness", "active-generation publication authority and reversible maintenance hold"]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+[
+  {"product":"caddy","reference":"docker.io/library/caddy:2.11.7","source":"https://github.com/caddyserver/caddy/releases/tag/v2.11.7"},
+  {"product":"ntfy","reference":"docker.io/binwiederhier/ntfy:v2.35.0","source":"https://github.com/binwiederhier/ntfy/releases/tag/v2.35.0"},
+  {"product":"keycloak","reference":"quay.io/keycloak/keycloak:26.8.1","source":"https://github.com/keycloak/keycloak/releases/tag/26.8.1"},
+  {"product":"openbao","reference":"quay.io/openbao/openbao:2.7.2","source":"https://github.com/openbao/openbao/releases/tag/v2.7.2"},
+  {"product":"grafana","reference":"docker.io/grafana/grafana:13.3.0","source":"https://github.com/grafana/grafana/releases/tag/v13.3.0"},
+  {"product":"loki","reference":"docker.io/grafana/loki:3.7.9","source":"https://github.com/grafana/loki/releases/tag/v3.7.9"},
+  {"product":"alloy","reference":"docker.io/grafana/alloy:v1.21.3","source":"https://github.com/grafana/alloy/releases/tag/v1.21.3"},
+  {"product":"prometheus","reference":"quay.io/prometheus/prometheus:v3.15.1","source":"https://github.com/prometheus/prometheus/releases/tag/v3.15.1"},
+  {"product":"alertmanager","reference":"quay.io/prometheus/alertmanager:v0.34.2","source":"https://github.com/prometheus/alertmanager/releases/tag/v0.34.2"},
+  {"product":"node-exporter","reference":"quay.io/prometheus/node-exporter:v1.12.1","source":"https://github.com/prometheus/node_exporter/releases/tag/v1.12.1"},
+  {"product":"synapse","reference":"ghcr.io/element-hq/synapse:v1.164.1","source":"https://github.com/element-hq/synapse/releases/tag/v1.164.1"},
+  {"product":"matrix-authentication-service","reference":"ghcr.io/element-hq/matrix-authentication-service:1.28.0","source":"https://github.com/element-hq/matrix-authentication-service/releases/tag/v1.28.0"},
+  {"product":"element","reference":"docker.io/vectorim/element-web:v1.12.33","source":"https://github.com/element-hq/element-web/releases/tag/v1.12.33"},
+  {"product":"livekit","reference":"docker.io/livekit/livekit-server:v1.13.11","source":"https://github.com/livekit/livekit/releases/tag/v1.13.11"},
+  {"product":"mailserver","reference":"ghcr.io/docker-mailserver/docker-mailserver:16.0.1","source":"https://github.com/docker-mailserver/docker-mailserver/releases/tag/v16.0.1"},
+  {"product":"kopia","reference":"docker.io/kopia/kopia:0.23.1","source":"https://github.com/kopia/kopia/releases/tag/v0.23.1"}
+]

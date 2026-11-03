@@ -1,0 +1,8 @@
+# Native KVS 0.3.2 has no PostgreSQL TLS connector. Retain its unmodified binary,
+# using the already-pinned Huly Node runtime for a loopback-only verified TLS bridge.
+FROM docker.io/hardcoreeng/hulykvs@sha256:73f268e2f42ab9c41b805b574d9ab583cfab063e7d7573df450b00ebb895ff7e AS native
+FROM docker.io/hardcoreeng/account@sha256:8c96d08f0a095269fe6d730132facffdd08a21d186fba51f38296fac5aade02d
+COPY --from=native /usr/local/bin/hulykvs /usr/local/bin/hulykvs
+USER 1000:1000
+ENTRYPOINT ["/usr/local/bin/node"]
+CMD ["/run/secrets/huly-kvs-proxy.cjs"]

@@ -1,0 +1,5 @@
+[
+ {"product":"huly-redpanda","reference":"docker.io/redpandadata/redpanda:v24.3.6","source":"https://github.com/hcengineering/huly-selfhost/blob/main/compose.yml"},
+ {"product":"jupyter-notebook","reference":"quay.io/jupyter/base-notebook:hub-6.1.1","source":"https://quay.io/repository/jupyter/base-notebook?tab=tags"},
+ {"product":"matrix-rtc-authorizer","reference":"ghcr.io/element-hq/lk-jwt-service:0.9.0","source":"https://github.com/element-hq/lk-jwt-service/releases/tag/v0.9.0"}
+]

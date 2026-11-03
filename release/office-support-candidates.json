@@ -1,0 +1,3 @@
+[
+ {"product":"office-rabbitmq","reference":"docker.io/library/rabbitmq:4.2.9","source":"https://www.rabbitmq.com/docs/4.2/download"}
+]

@@ -1,0 +1,6 @@
+{"feeds":[
+{"id":"guardian-china","account":"rss_guardian_china","display_name":"Guardian China","source":"The Guardian","url":"https://www.theguardian.com/world/china/rss"},
+{"id":"china-digital-times","account":"rss_china_digital_times","display_name":"China Digital Times","source":"China Digital Times","url":"https://chinadigitaltimes.net/feed/"},
+{"id":"diplomat-china","account":"rss_diplomat_china","display_name":"The Diplomat China","source":"The Diplomat","url":"https://thediplomat.com/tag/china/feed/"},
+{"id":"scmp-china","account":"rss_scmp_china","display_name":"SCMP China","source":"South China Morning Post","url":"https://www.scmp.com/rss/4/feed"}
+]}

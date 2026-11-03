@@ -1,0 +1,22 @@
+[
+ {"product":"postgres","reference":"docker.io/library/postgres:17.11-bookworm","source":"https://hub.docker.com/_/postgres"},
+ {"product":"mariadb","reference":"docker.io/library/mariadb:10.11.19-jammy","source":"https://hub.docker.com/_/mariadb"},
+ {"product":"memcached","reference":"docker.io/library/memcached:1.6.45-alpine","source":"https://hub.docker.com/_/memcached"},
+ {"product":"valkey","reference":"docker.io/valkey/valkey:7.2.15-alpine","source":"https://github.com/valkey-io/valkey/releases/tag/7.2.15"},
+ {"product":"bookstack","reference":"lscr.io/linuxserver/bookstack:version-v26.09.2","source":"https://github.com/linuxserver/docker-bookstack/releases/tag/v26.09.2-ls294"},
+ {"product":"qbittorrent","reference":"lscr.io/linuxserver/qbittorrent:5.3.0_v2.1.2-ls485","source":"https://github.com/linuxserver/docker-qbittorrent/releases/tag/5.3.0_v2.1.2-ls485"},
+ {"product":"forgejo","reference":"codeberg.org/forgejo/forgejo:17.0.1","source":"https://codeberg.org/forgejo/forgejo/releases/tag/v17.0.1"},
+ {"product":"seafile","reference":"docker.io/seafileltd/seafile-mc:13.0.28","source":"https://hub.docker.com/r/seafileltd/seafile-mc/tags"},
+ {"product":"searxng","reference":"docker.io/searxng/searxng:2026.10.30-ffa88e3ba","source":"https://hub.docker.com/r/searxng/searxng/tags"},
+ {"product":"huly-cockroach","reference":"docker.io/cockroachdb/cockroach:v24.2.10","source":"https://github.com/hcengineering/huly-selfhost/blob/main/compose.yml"},
+ {"product":"huly-objectstore","reference":"docker.io/pgsty/silo:RELEASE.2026-10-26T00-00-00Z","source":"https://github.com/hcengineering/huly-selfhost/blob/main/compose.yml"},
+ {"product":"huly-rekoni","reference":"docker.io/hardcoreeng/rekoni-service:v0.7.426","source":"https://github.com/hcengineering/platform/releases/tag/v0.7.426"},
+ {"product":"huly-transactor","reference":"docker.io/hardcoreeng/transactor:v0.7.426","source":"https://github.com/hcengineering/platform/releases/tag/v0.7.426"},
+ {"product":"huly-collaborator","reference":"docker.io/hardcoreeng/collaborator:v0.7.426","source":"https://github.com/hcengineering/platform/releases/tag/v0.7.426"},
+ {"product":"huly-account","reference":"docker.io/hardcoreeng/account:v0.7.426","source":"https://github.com/hcengineering/platform/releases/tag/v0.7.426"},
+ {"product":"huly-workspace","reference":"docker.io/hardcoreeng/workspace:v0.7.426","source":"https://github.com/hcengineering/platform/releases/tag/v0.7.426"},
+ {"product":"huly-front","reference":"docker.io/hardcoreeng/front:v0.7.426","source":"https://github.com/hcengineering/platform/releases/tag/v0.7.426"},
+ {"product":"huly-fulltext","reference":"docker.io/hardcoreeng/fulltext:v0.7.426","source":"https://github.com/hcengineering/platform/releases/tag/v0.7.426"},
+ {"product":"huly-stats","reference":"docker.io/hardcoreeng/stats:v0.7.426","source":"https://github.com/hcengineering/platform/releases/tag/v0.7.426"},
+ {"product":"huly-kvs","reference":"docker.io/hardcoreeng/hulykvs:v0.7.426","source":"https://github.com/hcengineering/platform/releases/tag/v0.7.426"}
+]

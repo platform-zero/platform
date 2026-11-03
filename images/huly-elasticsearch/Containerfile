@@ -1,0 +1,9 @@
+# Preserve upstream Elasticsearch/ingest-attachment binaries and their packaged license notices.
+# This exact offline context contains the official 7.14.2 plugin ZIP and its verified SHA-512 file.
+FROM docker.io/library/elasticsearch@sha256:55a0901f558968fb615d25032fdbeb9c6dd112d8ead05b830b1da4326e2f482b
+USER 0
+COPY ingest-attachment-7.14.2.zip ingest-attachment-7.14.2.zip.sha512 /tmp/
+RUN cd /tmp && sha512sum -c ingest-attachment-7.14.2.zip.sha512 && \
+    /usr/share/elasticsearch/bin/elasticsearch-plugin install --batch file:///tmp/ingest-attachment-7.14.2.zip && \
+    rm /tmp/ingest-attachment-7.14.2.zip /tmp/ingest-attachment-7.14.2.zip.sha512
+USER 1000:1000

@@ -5,3 +5,5 @@ out/
 *.key
 *.p12
 site/
+__pycache__/
+*.pyc

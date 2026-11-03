@@ -1,0 +1,25 @@
+{
+  "feeds": [
+    {
+      "id": "abc-tas",
+      "account": "rss_abc_tas",
+      "display_name": "ABC Tasmania",
+      "source": "ABC News",
+      "url": "https://www.abc.net.au/news/feed/5512674/rss.xml"
+    },
+    {
+      "id": "tasmanian-times",
+      "account": "rss_tasmanian_times",
+      "display_name": "Tasmanian Times",
+      "source": "Tasmanian Times",
+      "url": "https://tasmaniantimes.com/feed/"
+    },
+    {
+      "id": "examiner-tas",
+      "account": "rss_examiner_tas",
+      "display_name": "The Examiner Tasmania",
+      "source": "The Examiner",
+      "url": "https://www.examiner.com.au/rss.xml"
+    }
+  ]
+}

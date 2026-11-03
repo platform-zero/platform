@@ -1,0 +1,16 @@
+[
+ {"product":"mastodon","reference":"ghcr.io/mastodon/mastodon:v4.7.4","source":"https://github.com/mastodon/mastodon/blob/v4.7.4/docker-compose.yml"},
+ {"product":"mastodon-streaming","reference":"ghcr.io/mastodon/mastodon-streaming:v4.7.4","source":"https://github.com/mastodon/mastodon/blob/v4.7.4/docker-compose.yml"},
+ {"product":"erpnext","reference":"docker.io/frappe/erpnext:v15.124.3","source":"https://github.com/frappe/erpnext/releases/tag/v15.124.3"},
+ {"product":"onlyoffice","reference":"docker.io/onlyoffice/documentserver:10.0.0","source":"https://github.com/ONLYOFFICE/DocumentServer/releases/tag/v10.0.0"},
+ {"product":"firefly-iii","reference":"docker.io/fireflyiii/core:version-6.7.9","source":"https://github.com/firefly-iii/firefly-iii/releases/tag/v6.7.9"},
+ {"product":"donetick","reference":"docker.io/donetick/donetick:v0.1.85","source":"https://github.com/donetick/donetick/releases/tag/v0.1.85"},
+ {"product":"planka","reference":"ghcr.io/plankanban/planka:2.2.1","source":"https://github.com/plankanban/planka/releases/tag/v2.2.1"},
+ {"product":"jupyterhub","reference":"quay.io/jupyterhub/jupyterhub:6.1.1","source":"https://github.com/jupyterhub/jupyterhub/tree/6.1.1"},
+ {"product":"jellyfin","reference":"docker.io/jellyfin/jellyfin:12.4","source":"https://github.com/jellyfin/jellyfin/releases/tag/v12.4"},
+ {"product":"homeassistant","reference":"ghcr.io/home-assistant/home-assistant:2026.10.4","source":"https://github.com/home-assistant/core/releases/tag/2026.10.4"},
+ {"product":"crowdsec","reference":"docker.io/crowdsecurity/crowdsec:v1.8.2","source":"https://github.com/crowdsecurity/crowdsec/releases/tag/v1.8.2"},
+ {"product":"opensearch","reference":"docker.io/opensearchproject/opensearch:3.9.0","source":"https://github.com/opensearch-project/OpenSearch/releases/tag/3.9.0"},
+ {"product":"huly-elasticsearch","reference":"docker.io/library/elasticsearch:7.14.2","source":"https://github.com/hcengineering/huly-selfhost/blob/main/compose.yml"},
+ {"product":"huly-redpanda","reference":"docker.io/redpandadata/redpanda:v24.3.6","source":"https://github.com/hcengineering/huly-selfhost/blob/main/compose.yml"}
+]

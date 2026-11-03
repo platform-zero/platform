@@ -1,0 +1,10 @@
+# Native Stalwart binary unchanged; Python is used only by the retired initializer.
+FROM ghcr.io/stalwartlabs/stalwart@sha256:103bf1f76d4ed27ada7eae1744236bb3c01c2a0bda97303baa59a2e5bf18623d AS native
+USER 0:0
+RUN cp /usr/local/bin/stalwart /usr/local/bin/stalwart.plain && cmp /usr/local/bin/stalwart /usr/local/bin/stalwart.plain && mv /usr/local/bin/stalwart.plain /usr/local/bin/stalwart
+USER 2000:2000
+FROM ghcr.io/sonroyaalmerol/docker-sogo@sha256:e707534377ba45814d9cb4208bd008184327e319605607c738318711c00c5b5a
+COPY --from=native /usr/local/bin/stalwart /usr/local/bin/stalwart
+WORKDIR /tmp
+USER 2000:2000
+ENTRYPOINT ["/usr/bin/python3"]

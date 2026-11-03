@@ -1,0 +1,15 @@
+FROM docker.io/onlyoffice/documentserver@sha256:bff1a9fd46f2b79ada776fd0447c3fccf66cbf44c1996ec9316efa8ac4ee3fd5
+# Precompute upstream fonts/themes once, offline, rather than modifying software on every boot.
+# Preserve upstream licensing, branding, source notices and native application binaries.
+USER 0
+RUN /usr/bin/documentserver-generate-allfonts.sh true true \
+ && chmod a+r /etc/onlyoffice/documentserver/default.json /etc/onlyoffice/documentserver/production-linux.json \
+ && chmod -R a+rX /var/www/onlyoffice/documentserver/sdkjs /var/www/onlyoffice/documentserver/fonts /var/www/onlyoffice/documentserver/server/FileConverter/bin \
+ && rm /etc/onlyoffice/documentserver/local.json
+RUN /usr/bin/documentserver-flush-cache.sh --hash p0v3office1000 --restart false \
+ && test -s /var/www/onlyoffice/documentserver/web-apps/apps/api/documents/api.js \
+ && ! grep -q '{{HASH_POSTFIX}}' /var/www/onlyoffice/documentserver/web-apps/apps/api/documents/api.js \
+ && test -s /var/www/onlyoffice/documentserver/sdkjs/common/AllFonts.js \
+ && test -s /var/www/onlyoffice/documentserver/server/FileConverter/bin/font_selection.bin
+USER 1000:1000
+ENTRYPOINT []

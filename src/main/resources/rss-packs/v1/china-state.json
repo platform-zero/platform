@@ -1,0 +1,6 @@
+{"feeds":[
+{"id":"cgtn-china","account":"rss_cgtn_china","display_name":"CGTN China","source":"CGTN","url":"https://www.cgtn.com/subscribe/rss/section/china.xml"},
+{"id":"cgtn-politics","account":"rss_cgtn_politics","display_name":"CGTN Politics","source":"CGTN","url":"https://www.cgtn.com/subscribe/rss/section/politics.xml"},
+{"id":"cgtn-world","account":"rss_cgtn_world","display_name":"CGTN World","source":"CGTN","url":"https://www.cgtn.com/subscribe/rss/section/world.xml"},
+{"id":"cgtn-business","account":"rss_cgtn_business","display_name":"CGTN Business","source":"CGTN","url":"https://www.cgtn.com/subscribe/rss/section/business.xml"}
+]}

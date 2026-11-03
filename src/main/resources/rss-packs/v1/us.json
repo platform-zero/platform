@@ -1,0 +1,4 @@
+{"feeds":[
+{"id":"nyt-us","account":"rss_nyt_us","display_name":"New York Times US","source":"The New York Times","url":"https://rss.nytimes.com/services/xml/rss/nyt/US.xml"},
+{"id":"propublica-us","account":"rss_propublica_us","display_name":"ProPublica","source":"ProPublica","url":"https://www.propublica.org/feeds/propublica/main"}
+]}
