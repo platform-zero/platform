@@ -1,0 +1,72 @@
+schemaVersion: 2
+provenanceSha256: b12ef0f90f9e4b8262f28058151def6c44c7f3f6597583787de3688bd66bc5cd
+manifestResource: canonical/r7/manifest.yaml
+manifestSha256: 8cbf33dc09e207b0ce5daaddb12d6b871b61bfb9c7d85db91c0565335fd28ae3
+lastManifestSha256: 08bbd8fb06880329deb6fc60de1876d621b049abe177eb65262cf640bd7f5355
+penultimateManifestSha256: 01a16971a26a2b30e2e8c395029ef46bee1081c4380c32ad323b4ce9171199a8
+latestPriorManifestSha256: fad72915041487cd34c1dcf650d8f924f873a196d3f02305222c15423ae3b0cb
+priorManifestSha256: 22c4dc7d401c6bcb0053125872f472691cefe13147b7b8902833f796b27a65a1
+intermediateManifestSha256: 4289beb343bd5895691523d4cc347e61baf74af32b78b7a495a86846af881133
+previousManifestSha256: b67e948e6cf68398a61d3d284de7ee1abeeaf8b57897afa6b057949e7e84a53c
+entries:
+  - id: private-alertmanager
+    revision: 1
+    resource: alertmanager/r1/fragment.yaml
+    sha256: a9830da0bf2f72d7bacbdfa904f7c131d4077a342c3136e88cf97de5a21ce5ab
+    templates: {alertmanager.yml: 567fd4bd72a73c51d611e907bd05a76e9360ae1689c40b00e667f588f0fdfa4b}
+  - id: private-prometheus
+    revision: 1
+    resource: prometheus/r1/fragment.yaml
+    sha256: 511c9b3a50cd1755683239a3dbcec59ec0a900f0d0094b8eea4c2c6a22f81666
+    templates: {prometheus.yml: 3d0c70e81be5abcb9c1c3b6f057bde17318eb3c73b2ac0ee1a10d3535d6ef68d}
+  - id: private-loki
+    revision: 1
+    resource: loki/r1/fragment.yaml
+    sha256: 5ace4432b4997e87b999f58e9eeb70ced6ad298ac5016afabbd09c59be1cf4c3
+    templates: {loki.yml: 02aac6ba05bddcb325cd851260086168160cfec608c6c6fa3063e4ebc4e88352}
+  - id: private-alloy
+    revision: 1
+    resource: alloy/r1/fragment.yaml
+    sha256: 16790ec04f86016d2f689cf0f4933fadb1ffddf1039f72923048538bc95ee51c
+    templates: {config.alloy: a5c92767c3b6f42b665c8b468aa5b138cd7d05de5cf388a684689cd4acd8f59e}
+  - id: private-node-exporter
+    revision: 1
+    resource: node-exporter/r1/fragment.yaml
+    sha256: 403d3916cd5eb45d145f474f32cccb58376745dbdbdd91f84f3f7a7e4ac605d2
+  - id: private-grafana
+    revision: 1
+    resource: grafana/r1/fragment.yaml
+    sha256: bb6b2a082157da92a79699fb9040b51a7314b8fd987858af607960a92c74708f
+    templates: {grafana-datasources.yml: 1c335f7b43d40e49a8ec37c4e291a21bfbf5111f9848b912784265fe1fa94050}
+  - id: shared-valkey
+    revision: 1
+    resource: valkey/r1/fragment.yaml
+    sha256: 2c3534ab9256e2f8a7752851e62a5b07ee6725f63fd2476b694fc35f22b3451d
+  - id: shared-ntfy
+    revision: 1
+    resource: ntfy/r1/fragment.yaml
+    sha256: 9d036f99c9be4228eef7b7e42b7f6a2d206c5b8056e8c4d43ff517985e171393
+  - id: planka-postgres
+    revision: 1
+    resource: planka/r1/fragment.yaml
+    sha256: 2a9d63897e071aff1e841e5afcd5bbeaf6d9c9fe55710ec87ddb785de516b560
+  - id: shared-mariadb
+    revision: 1
+    resource: mariadb/r1/fragment.yaml
+    sha256: 683b704ecb7488e9771e7ecac14803dcd7b3503fb42805e60940c28428ba6da1
+  - id: shared-memcached
+    revision: 1
+    resource: memcached/r1/fragment.yaml
+    sha256: 927f52a85ead969ad3812437601ceea9bf3c0f4a93a3b0e2ab01c80573e57ebe
+  - id: identity-keycloak
+    revision: 1
+    resource: keycloak/r1/fragment.yaml
+    sha256: 9eb13f0a60c5732371687e8ebc26a68ed521cdf25e0f728467264a1b9cfe89f6
+  - id: identity-keycloak
+    revision: 2
+    resource: keycloak/r2/fragment.yaml
+    sha256: 33e62501b015c58f96edf785214b14631f7569508c658bd31acabbc0e96717af
+  - id: identity-keycloak
+    revision: 3
+    resource: keycloak/r3/fragment.yaml
+    sha256: 238a41dca23ffa24a8d2f625b4f8e7f5c4b8d88ee80a747ba113af92cb729a25

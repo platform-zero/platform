@@ -1,0 +1,86 @@
+schemaVersion: 2
+id: postgres-timescale
+revision: 1
+product: postgres
+artifacts: [postgres-timescale]
+exportedInputs: [postgres-ca.pem]
+networks: [db-admin]
+volumes:
+  - {id: postgres, userId: 999}
+inputs:
+  - name: postgres-bootstrap.env
+    owner: postgres
+    purpose: BOOTSTRAP
+    consumers: [postgres-init]
+  - name: postgres.pem
+    owner: postgres
+    purpose: RUNTIME
+    consumers: [postgres]
+  - name: postgres-key.pem
+    owner: postgres
+    purpose: RUNTIME
+    consumers: [postgres]
+  - name: postgres-hba.conf
+    owner: postgres
+    purpose: RUNTIME
+    consumers: [postgres]
+processes:
+  - id: postgres-init
+    artifact: postgres-timescale
+    userId: 999
+    oneShot: true
+    entrypoint: /bin/sh
+    environmentFile: postgres-bootstrap.env
+    networks: [db-admin]
+    volumes:
+      - {volume: postgres, target: /var/lib/postgresql/data}
+    command:
+      - -ec
+      - |
+        umask 077
+        printf '%s' "$POSTGRES_PASSWORD" > /tmp/pw
+        /usr/lib/postgresql/17/bin/initdb -D /var/lib/postgresql/data --username=postgres --pwfile=/tmp/pw --auth-host=scram-sha-256 --auth-local=trust
+  - id: postgres
+    artifact: postgres-timescale
+    userId: 999
+    memoryMiB: 2048
+    entrypoint: /usr/lib/postgresql/17/bin/postgres
+    networks: [db-admin]
+    volumes:
+      - {volume: postgres, target: /var/lib/postgresql/data}
+    files:
+      - {file: postgres.pem, target: /run/secrets/postgres.pem}
+      - {file: postgres-key.pem, target: /run/secrets/postgres-key.pem}
+      - {file: postgres-hba.conf, target: /run/secrets/postgres-hba.conf}
+    tmpfs: [/tmp, /var/run/postgresql]
+    command:
+      - -D
+      - /var/lib/postgresql/data
+      - -c
+      - listen_addresses=*
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/run/secrets/postgres.pem
+      - -c
+      - ssl_key_file=/run/secrets/postgres-key.pem
+      - -c
+      - hba_file=/run/secrets/postgres-hba.conf
+      - -c
+      - shared_preload_libraries=timescaledb
+      - -c
+      - max_worker_processes=16
+      - -c
+      - timescaledb.max_background_workers=8
+    readiness: [pg_isready, -U, postgres, -d, postgres]
+install:
+  processes: [postgres-init, postgres]
+  dependencies:
+    postgres-init: []
+    postgres: [postgres-init]
+restore:
+  processes: [postgres]
+  dependencies:
+    postgres: []
+  additionalArguments:
+    postgres: [-c, timescaledb.restoring=on]

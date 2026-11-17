@@ -1,11 +1,13 @@
 package net.datamancy.platform
 
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermissions
 import java.security.SecureRandom
 import java.util.HexFormat
 import kotlinx.serialization.json.*
 
-/** Exact private v0.7.426 cohort. Native Kafka remains unauthenticated inside this dedicated internal network. */
+/** Exact private v0.7.426 cohort. V2 Kafka is native mTLS with a localhost-only app bridge. */
 internal object HulyRuntime {
     const val SEARCH_BASE = "docker.io/library/elasticsearch@sha256:55a0901f558968fb615d25032fdbeb9c6dd112d8ead05b830b1da4326e2f482b"
     const val SEARCH_IMAGE = "localhost/p0v3-huly-elasticsearch@sha256:b07456315f9a55e5940a4da24e5d5a0ab6293f8c8cf0f6ae2c826f0b739ae133"
@@ -17,6 +19,29 @@ internal object HulyRuntime {
     const val CADDY_IMAGE = "localhost/p0v3-huly-caddy@sha256:12aaf65164cae642f31c1434d19ff3fd83cea5bb2e03ecaf473308b594ef47b9"
     const val CADDY_ID = "dba10c44979358e71c0e6893e72b8788724ba663786d3c09c12e353b41d47776"
     private fun resource(name: String): String = requireNotNull(javaClass.getResourceAsStream("/runtime/$name")).bufferedReader().use { it.readText() }
+    /** Dedicated issuing key is ephemeral: bootstrap superuser key never becomes a daemon input. */
+    private fun generateKafkaPki(run: (Path, List<String>) -> Unit = ::privatePkiOpenSsl): Map<String, String> {
+        val root = Files.createTempDirectory("p0v3-huly-kafka-pki-",
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+        try {
+            run(root, listOf("req", "-x509", "-newkey", "rsa:3072", "-nodes", "-sha256", "-days", "365",
+                "-subj", "/CN=p0v3-huly-kafka-ca", "-keyout", "ca-key.pem", "-out", "ca.pem",
+                "-addext", "basicConstraints=critical,CA:TRUE", "-addext", "keyUsage=critical,keyCertSign,cRLSign"))
+            for ((name, subject) in listOf("node" to "huly-redpanda", "client" to "huly-kafka",
+                "admin" to "huly-bootstrap")) {
+                val usage = if (name == "node") "serverAuth\nsubjectAltName=DNS:huly-redpanda\n" else "clientAuth\n"
+                Files.writeString(root.resolve("$name.ext"), "basicConstraints=critical,CA:FALSE\n" +
+                    "keyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=$usage")
+                run(root, listOf("req", "-new", "-newkey", "rsa:3072", "-nodes", "-sha256",
+                    "-subj", "/CN=$subject", "-keyout", "$name-key.pem", "-out", "$name.csr"))
+                run(root, listOf("x509", "-req", "-sha256", "-days", "365", "-in", "$name.csr",
+                    "-CA", "ca.pem", "-CAkey", "ca-key.pem", "-CAcreateserial", "-extfile", "$name.ext",
+                    "-out", "$name.pem"))
+            }
+            return listOf("ca.pem", "node.pem", "node-key.pem", "client.pem", "client-key.pem",
+                "admin.pem", "admin-key.pem").associateWith { Files.readString(root.resolve(it)) }
+        } finally { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
+    }
     fun spec(inventory: AcquiredInventory, name: String = "huly"): PrivateDeploymentSpec {
         fun image(product: String) = inventory.images.single { it.product == product }.also { require(it.os == "linux" && it.architecture == "amd64") }
         require(image("huly-elasticsearch").pinnedImage == SEARCH_BASE)
@@ -206,6 +231,154 @@ internal object HulyRuntime {
         """.trimIndent() + "\n"
         return result
     }
+    /** Owned Cockroach/Kafka/S3/Elastic are protocol-specific Huly state, not duplicates of shared SQL/cache. */
+    fun canonicalFragment(inventory: AcquiredInventory, name: String): CanonicalProviderFragment {
+        val legacy = spec(inventory, name)
+        val names = legacy.processes.associate { it.id to (if (it.id == "huly") "huly" else "huly-${it.id}") }
+        val clients = setOf("account", "account-bootstrap", "workspace", "transactor", "collaborator",
+            "rekoni", "fulltext", "front", "stats")
+        fun file(name: String) = RuntimeFile("huly-$name", "/run/secrets/$name")
+        val processes = legacy.processes.map { p ->
+            val scoped = p.copy(
+                id = names.getValue(p.id),
+                dependencies = p.dependencies.map(names::getValue) + (if (p.id in clients) listOf("huly-redpanda-acl") else emptyList()),
+                volumes = p.volumes.map { it.copy(volume = "huly-${it.volume}") },
+                files = p.files.map { it.copy(file = "huly-${it.file}") },
+                environmentFile = p.environmentFile?.let { "huly-$it" },
+                networks = if (p.id == "huly") listOf("huly-data", "huly-web") else listOf("huly-data"),
+                command = p.command.map { command -> names.entries.fold(command) { value, (old, new) ->
+                    value.replace("$old:", "$new:")
+                } }
+            )
+            when (p.id) {
+                "redpanda" -> scoped.copy(
+                    files = scoped.files + listOf(file("rp-ca.pem"), file("rp-node.pem"), file("rp-node-key.pem")),
+                    readinessHttpPort = null, readinessHttpPath = "/",
+                    readiness = listOf("/opt/redpanda/bin/rpk", "cluster", "health",
+                        "--exit-when-healthy", "--api-urls", "127.0.0.1:9644"))
+                in clients -> scoped.copy(
+                    files = scoped.files + listOf(file("rp-ca.pem"), file("rp-client.pem"),
+                        file("rp-client-key.pem"), file("huly-kafka-bridge.cjs")),
+                    command = listOf("--require", "/run/secrets/huly-kafka-bridge.cjs") + scoped.command)
+                else -> scoped
+            }
+        } + inventory.images.single { it.product == "huly-redpanda" }.let { queue ->
+            RuntimeProcess("huly-redpanda-acl", queue.pinnedImage, queue.imageId, 1000,
+                dependencies = listOf("huly-redpanda"), oneShot = true,
+                entrypoint = "/opt/redpanda/bin/rpk",
+                command = listOf("security", "acl", "create", "--allow-principal", "User:huly-kafka", "--operation", "all",
+                    "--topic", "*", "--group", "*", "--brokers", "huly-redpanda:9092",
+                    "--tls-truststore", "/run/secrets/rp-ca.pem", "--tls-cert", "/run/secrets/rp-admin.pem",
+                    "--tls-key", "/run/secrets/rp-admin-key.pem"),
+                files = listOf(file("rp-ca.pem"), file("rp-admin.pem"), file("rp-admin-key.pem")),
+                networks = listOf("huly-data"), apparmorProfile = "p0v3-private-v1", memoryMiB = 256)
+        }
+        val partial = legacy.copy(store = RuntimeStore.CANONICAL_V2,
+            volumes = legacy.volumes.map { it.copy(id = "huly-${it.id}") },
+            processes = processes, networks = listOf("huly-data", "huly-web"))
+        PrivateDeployment.validate(partial)
+        return CanonicalProviderFragment("huly", partial, webNetworks = setOf("huly-web"))
+    }
+
+    /** Generate Huly-only files after pure graph admission; peer URLs match the scoped owned process IDs. */
+    fun canonicalInputs(
+        web: () -> Map<String, String> = { PrivateWebPki.generate("huly",
+            dnsNames = listOf("huly", "work.datamancy.net")) },
+        database: () -> Map<String, String> = { PrivateSearchPki.generate("huly-cockroach", "node", "root") },
+        search: () -> Map<String, String> = { PrivateSearchPki.generate("huly-elastic") },
+        secret: () -> String = { HexFormat.of().formatHex(ByteArray(32).also { SecureRandom().nextBytes(it) }) },
+        kafkaPki: () -> Map<String, String> = ::generateKafkaPki
+    ): Map<String, String> {
+        val peers = listOf("cockroach", "elastic", "objects", "redpanda", "stats", "account", "workspace",
+            "transactor", "collaborator", "rekoni", "fulltext", "front", "kvs")
+        val result = inputs(web, database, search, secret).mapKeys { (name, _) -> "huly-$name" }
+            .mapValues { (name, original) ->
+                val scoped = peers.fold(original) { content, peer -> content.replace("$peer:", "huly-$peer:") }
+                    .replace("minio|objects?", "minio|huly-objects?")
+                when (name) {
+                    "huly-huly-kvs-proxy.cjs" -> scoped.replace("host: 'cockroach'", "host: 'huly-cockroach'")
+                        .replace("servername: 'cockroach'", "servername: 'huly-cockroach'")
+                    "huly-caddyfile" -> scoped.replace("not header Origin https://huly:8443",
+                        "not header Origin https://work.datamancy.net")
+                    else -> scoped.replace("https://huly:8443", "https://work.datamancy.net")
+                        .replace("wss://huly:8443", "wss://work.datamancy.net")
+                        .replace("QUEUE_CONFIG=huly-redpanda:9092", "QUEUE_CONFIG=127.0.0.1:9092")
+                }
+            }.toMutableMap()
+        val pki = kafkaPki()
+        require(pki.keys == setOf("ca.pem", "node.pem", "node-key.pem", "client.pem", "client-key.pem",
+            "admin.pem", "admin-key.pem"))
+        // Native Huly services also call their own exact public HTTPS origin; trust
+        // only this generation's Huly web CA in addition to existing Cockroach/ES CAs.
+        result["huly-backend-ca.pem"] = result.getValue("huly-backend-ca.pem") + result.getValue("huly-ca.pem")
+        result["huly-rp-ca.pem"] = pki.getValue("ca.pem")
+        result["huly-rp-node.pem"] = pki.getValue("node.pem")
+        result["huly-rp-node-key.pem"] = pki.getValue("node-key.pem")
+        result["huly-rp-client.pem"] = pki.getValue("client.pem")
+        result["huly-rp-client-key.pem"] = pki.getValue("client-key.pem")
+        result["huly-rp-admin.pem"] = pki.getValue("admin.pem")
+        result["huly-rp-admin-key.pem"] = pki.getValue("admin-key.pem")
+        result["huly-huly-kafka-bridge.cjs"] = resource("huly-kafka-bridge.cjs")
+        for (id in setOf("account", "account-bootstrap", "workspace", "transactor", "collaborator", "rekoni",
+            "fulltext", "front", "stats")) {
+            val name = "huly-$id.env"
+            // account-bootstrap shares account.env; no separate environment file.
+            if (name in result) result[name] = result.getValue(name) + "HULY_KAFKA_BRIDGE=v2\n"
+        }
+        result["huly-redpanda.yaml"] = """
+            redpanda:
+              data_directory: /state
+              node_id: 0
+              seed_servers: []
+              rpc_server: {address: 127.0.0.1, port: 33145}
+              advertised_rpc_api: {address: 127.0.0.1, port: 33145}
+              kafka_api: [{name: local, address: 0.0.0.0, port: 9092, authentication_method: mtls_identity}]
+              kafka_api_tls:
+                - name: local
+                  enabled: true
+                  require_client_auth: true
+                  key_file: /run/secrets/rp-node-key.pem
+                  cert_file: /run/secrets/rp-node.pem
+                  truststore_file: /run/secrets/rp-ca.pem
+              advertised_kafka_api: [{name: local, address: 127.0.0.1, port: 9092}]
+              admin: [{address: 127.0.0.1, port: 9644}]
+              enable_sasl: false
+              kafka_enable_authorization: true
+              kafka_mtls_principal_mapping_rules: ["RULE:^CN=(huly-kafka|huly-bootstrap)(,.*|$)/$1/"]
+              superusers: [huly-bootstrap]
+              developer_mode: true
+              enable_metrics_reporter: false
+              storage_min_free_bytes: 16777216
+              default_topic_replications: 1
+              default_topic_partitions: 1
+        """.trimIndent() + "\n"
+        return result
+    }
+
+    /** Explicit original-state projection; retain Kafka offsets, Cockroach identities, object IDs and search index. */
+    fun coldRestoreFragment(fresh: CanonicalProviderFragment): CanonicalProviderFragment {
+        require(fresh.product == "huly" && fresh.spec.processes.map { it.id }.toSet() == setOf(
+            "huly-cockroach", "huly-database-init", "huly-elastic-config-init", "huly-elastic", "huly-elastic-users",
+            "huly-objects", "huly-redpanda", "huly-redpanda-acl", "huly-stats", "huly-account-bootstrap", "huly-account", "huly-workspace",
+            "huly-transactor", "huly-collaborator", "huly-rekoni", "huly-fulltext", "huly-front", "huly-kvs", "huly"))
+        val byId = fresh.spec.processes.associateBy { it.id }
+        val initializers = byId.values.filter { it.oneShot }.map { it.id }.toSet()
+        require(initializers == setOf("huly-database-init", "huly-elastic-config-init", "huly-elastic-users",
+            "huly-account-bootstrap", "huly-redpanda-acl"))
+        fun dependency(id: String): List<String> = if (id in initializers) byId.getValue(id).dependencies.flatMap(::dependency)
+            else listOf(id)
+        val active = fresh.spec.processes.filterNot { it.oneShot }.map { process ->
+            val stable = process.copy(dependencies = process.dependencies.flatMap(::dependency).distinct())
+            val guard = when (process.id) {
+                "huly-elastic" -> "test -s /configuration/elasticsearch.keystore; test ! -L /configuration/elasticsearch.keystore; "
+                else -> null
+            }
+            if (guard == null) stable else stable.copy(entrypoint = "/bin/sh",
+                command = listOf("-ec", guard + "exec \"${'$'}@\"", "restored-huly", requireNotNull(stable.entrypoint)) + stable.command)
+        }
+        return fresh.copy(spec = fresh.spec.copy(processes = active)).also { PrivateDeployment.validate(it.spec) }
+    }
+
     fun prepare(inventory: AcquiredInventory, base: Path = PrivateDeployment.BASE, name: String = "huly", store: RuntimeStore = RuntimeStore.LEGACY): Path =
         RuntimePreparation.prepare(spec(inventory, name).copy(store = store), base) { inputs() }
 }

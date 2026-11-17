@@ -1,0 +1,74 @@
+schemaVersion: 2
+id: private-livekit-matrix-rtc
+revision: 1
+product: livekit
+artifacts: [livekit, matrix-rtc-authorizer, element]
+providers: [synapse, matrix-authentication-service, keycloak, caddy]
+providerProcesses:
+  synapse: [synapse]
+  matrix-authentication-service: [mas]
+  keycloak: [keycloak]
+  caddy: [caddy]
+networks: [rtc-data, rtc-turn, rtc-web, qualification-web, synapse-web]
+providerNetworks:
+  synapse: [synapse-web]
+  caddy: [rtc-web]
+webNetworks: [rtc-web, qualification-web]
+inputs:
+  - {name: livekit.yaml, owner: livekit, purpose: RUNTIME, consumers: [livekit]}
+  - {name: livekit-turn-template.yaml, owner: livekit, purpose: RUNTIME, consumers: [livekit]}
+  - {name: rtc-turn.pem, owner: livekit, purpose: RUNTIME, consumers: [livekit]}
+  - {name: rtc-turn-key.pem, owner: livekit, purpose: RUNTIME, consumers: [livekit]}
+  - {name: rtc-authorizer.env, owner: livekit, purpose: RUNTIME, consumers: [rtc-authorizer]}
+  - {name: rtc-registration.yaml, owner: synapse, purpose: RUNTIME, consumers: [rtc-authorizer]}
+  - {name: identity-ca.pem, owner: keycloak, purpose: RUNTIME, consumers: [rtc-authorizer]}
+  - {name: rtc-nginx.conf, owner: livekit, purpose: RUNTIME, consumers: [rtc-web]}
+processes:
+  - id: livekit
+    artifact: livekit
+    userId: 1000
+    memoryMiB: 1024
+    networks: [rtc-data, rtc-turn, qualification-web]
+    entrypoint: /livekit-server
+    command: [--config, /run/secrets/livekit.yaml]
+    files:
+      - {file: livekit.yaml, target: /run/secrets/livekit.yaml}
+      - {file: livekit-turn-template.yaml, target: /run/secrets/livekit-turn-template.yaml}
+      - {file: rtc-turn.pem, target: /run/secrets/rtc-turn.pem}
+      - {file: rtc-turn-key.pem, target: /run/secrets/rtc-turn-key.pem}
+    readinessHttpPort: 7880
+  - id: rtc-authorizer
+    artifact: matrix-rtc-authorizer
+    userId: 65532
+    memoryMiB: 256
+    networks: [rtc-data, synapse-web]
+    entrypoint: /lk-jwt-service
+    environmentFile: rtc-authorizer.env
+    files:
+      - {file: rtc-registration.yaml, target: /run/secrets/rtc-registration.yaml}
+      - {file: identity-ca.pem, target: /run/secrets/identity-ca.pem}
+    readinessHttpPort: 8080
+    readinessHttpPath: /healthz
+  - id: rtc-web
+    artifact: element
+    userId: 101
+    memoryMiB: 256
+    networks: [rtc-data, rtc-web]
+    entrypoint: /usr/sbin/nginx
+    command: [-c, /run/secrets/rtc-nginx.conf, -g, 'daemon off;']
+    files:
+      - {file: rtc-nginx.conf, target: /run/secrets/rtc-nginx.conf}
+    readinessHttpPort: 8080
+    readinessHttpPath: /healthz
+install:
+  processes: [livekit, rtc-authorizer, rtc-web]
+  dependencies:
+    livekit: []
+    rtc-authorizer: [synapse, mas, livekit, keycloak]
+    rtc-web: [rtc-authorizer, caddy]
+restore:
+  processes: [livekit, rtc-authorizer, rtc-web]
+  dependencies:
+    livekit: []
+    rtc-authorizer: [synapse, mas, livekit, keycloak]
+    rtc-web: [rtc-authorizer, caddy]

@@ -7,8 +7,9 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import kotlin.test.*
 
-/** All native effects replaced at the audited runtime/process boundary; real private files and
- * ownership/reference/journal/Caddy validation execute against this fixture's temporary directory. */
+/** Native effects and full restored-case verification are explicit unit boundaries. Real private
+ * files, ownership/reference/journal/Caddy validation use temporary roots. Synthetic restored
+ * receipts carry unitFixture=true and are never acceptable production qualification evidence. */
 internal class ReleaseControlTestFixture : AutoCloseable {
     val root: Path = Files.createTempDirectory("release-control-unit-").also {
         Files.setPosixFilePermissions(it, PosixFilePermissions.fromString("rwx------"))
@@ -38,6 +39,7 @@ internal class ReleaseControlTestFixture : AutoCloseable {
     var failure: String? = null
     var interruptedAcceptance = false
     var failedAcceptance = false
+    var failedRestoredVerification = false
     var importPassed = true
     var frozen = false
     var auditOverride: ((GenerationInspection) -> GenerationInspection)? = null
@@ -90,7 +92,7 @@ internal class ReleaseControlTestFixture : AutoCloseable {
                 inputs, PrivateDeployment.expectedFingerprint(spec, inputs), spec)
         }
         bundle = GenerationBundle(plan.generation, pins, 4096, contract.assemblySha256,
-            ownership = SiteOwnerships.bind(plan, contract, emptySet()))
+            ownership = SiteOwnerships.bind(plan, contract, site.approvedHosts))
         val bytes = json.encodeToString(bundle).toByteArray(); sourceHash = ReleaseLocks.sha256(bytes)
         ReleasePrivateFiles.save(sourceRoot.resolve("bundle.json"), bytes)
         val token = "a".repeat(64)
@@ -114,7 +116,10 @@ internal class ReleaseControlTestFixture : AutoCloseable {
     val operations = object : ReleaseRuntimeOperations {
         override fun stage(generation: String, bundle: String): GenerationOutcome { calls += "stage"; return outcome("stage") }
         override fun startRestored(inventory: AcquiredInventory, generation: String, bundle: String): GenerationOutcome {
-            calls += "start-restored:$generation"; return outcome("startup", bundle)
+            calls += "start-restored:$generation"
+            // The runtime startup operation owns failure isolation, including partial startup.
+            if (failure == "startup") isolate(generation, bundle)
+            return outcome("startup", bundle)
         }
         override fun inspect(generation: String, bundle: String): GenerationInspection {
             calls += "inspect"
@@ -133,6 +138,22 @@ internal class ReleaseControlTestFixture : AutoCloseable {
             val backups = sourceRoot.resolve("backups"); if (!Files.exists(backups)) dir(backups)
             val attempt = dir(backups.resolve(capture))
             ReleasePrivateFiles.save(attempt.resolve("intent.json"), json.encodeToString(held.access).toByteArray())
+            return held
+        }
+        override fun holdKopiaForRestore(inventory: AcquiredInventory, generation: String, bundle: String, capture: String,
+            reference: PendingRecoveryOperation): GenerationHeldCapture {
+            val references = sourceRoot.resolve("recovery-references")
+            val ledger = if (Files.exists(references)) RecoveryReferences(references)
+                else RecoveryReferences.initialize(references, emptyList())
+            ledger.protectPending(reference)
+            val held = holdKopiaForRestore(inventory, generation, bundle, capture)
+            val captures = sourceRoot.resolve("kopia-captures")
+            if (!Files.exists(captures)) dir(captures)
+            val captureRoot = dir(captures.resolve(capture))
+            ReleasePrivateFiles.save(captureRoot.resolve("capture.result.json"), json.encodeToString(
+                KopiaCaptureOutcome(capture, bundle, true, held.snapshot)).toByteArray())
+            ledger.bindCaptured(reference, held.snapshot)
+            ReleasePrivateFiles.save(sourceRoot.resolve("backups/$capture/held.json"), json.encodeToString(held).toByteArray())
             return held
         }
         override fun resumeHeldSourceAfterIsolation(inventory: AcquiredInventory, generation: String, bundle: String, capture: String,
@@ -164,20 +185,112 @@ internal class ReleaseControlTestFixture : AutoCloseable {
         calls += "import:$target:$cap"; assertEquals(sourceHash, generation.bundleSha256)
         return GenerationOutcome("restore-import", targetHash, importPassed)
     }
-    fun control(tx: ReleaseTransactionRequest = request) = NativeReleaseControl(tx, runtime, acceptance, ::restore, operations, base)
-    fun dispatcher(controls: ((ReleaseTransactionRequest, Path) -> ReleaseGenerationControl)? = null) = ReleaseDispatch(transactions,
+    private val journeys = object : ReleaseRestoredJourneys {
+        override fun execute(operation: String, invocation: ReleaseAcceptanceInvocation, source: ReleaseGeneration,
+            target: ReleaseGeneration, acceptance: ReleaseAcceptance, isolateTarget: () -> GenerationOutcome,
+            lifecycle: RestoredOwnerLifecycle): ActivationInput {
+            val original = execute(operation, invocation, source, target, acceptance, isolateTarget)
+            val isolationPath = base.resolve(target.id).resolve("isolate.result.json")
+            val isolationBytes = ReleasePrivateFiles.read(isolationPath)
+            val isolation = json.decodeFromString<GenerationOutcome>(isolationBytes.decodeToString())
+            require(isolation.action == "isolate" && isolation.passed && isolation.failureType == null &&
+                isolation.bundleSha256 == target.bundleSha256)
+            require(lifecycle.ownedUpdate == null) { "This unit fixture does not model owned update" }
+            val heldPin = requireNotNull(lifecycle.heldCapture)
+            require(ReleaseLocks.sha256(ReleasePrivateFiles.read(Path.of(heldPin.path))) == heldPin.sha256)
+            val resumed = requireNotNull(lifecycle.resumeSource)(isolation)
+            return pin("unit-restored-${target.id}-$operation.json", buildJsonObject {
+                put("unitFixture", true); put("operation", operation)
+                put("invocation", Json.encodeToJsonElement(invocation.input))
+                put("source", Json.encodeToJsonElement(source)); put("target", Json.encodeToJsonElement(target))
+                put("legacyBridge", Json.encodeToJsonElement(original)); put("held", Json.encodeToJsonElement(heldPin))
+                put("sourceResume", Json.encodeToJsonElement(resumed))
+                put("isolation", Json.encodeToJsonElement(ActivationInput(isolationPath.toString(), ReleaseLocks.sha256(isolationBytes))))
+            }.toString())
+        }
+        override fun execute(operation: String, invocation: ReleaseAcceptanceInvocation, source: ReleaseGeneration,
+            target: ReleaseGeneration, acceptance: ReleaseAcceptance,
+            isolateTarget: () -> GenerationOutcome): ActivationInput {
+            val member = base.resolve(target.id)
+            if (!Files.exists(member)) dir(member)
+            RestoredLifecycleDriver().settle(run = { acceptance.run(operation, invocation) },
+                safety = { emptyList() }, isolate = {
+                    val observed = isolateTarget()
+                    if (!Files.exists(member.resolve("isolate.result.json")))
+                        ReleasePrivateFiles.save(member.resolve("isolate.result.json"), json.encodeToString(observed).toByteArray())
+                    observed
+                }).requireForSourceDisposition()
+            val evidence = root.resolve("restored-bridges")
+            if (!Files.exists(evidence)) dir(evidence)
+            val path = dir(evidence.resolve(target.id))
+            val binding = RestoredBridgeBinding(operation = "r-111111111111", site = "unit",
+                sourceGeneration = source.id, targetGeneration = target.id, targetFingerprint = "a".repeat(64),
+                clientNetwork = "qualification-web", clientAddress = "10.88.0.2",
+                allowedClients = setOf("unit-native-client"), server = "https",
+                quiesceOperation = "r-222222222222", sourceStoppedProofSha256 = "b".repeat(64),
+                targetPrivateReadinessSha256 = "c".repeat(64), originalHosts = site.approvedHosts,
+                upstreams = request.ingress.upstreams, sourceCertificates = emptyMap(), sourcePrivateKeys = emptyMap(),
+                certificateFiles = emptyMap(), keyFiles = emptyMap(),
+                qualifierClientInvocationId = "r-333333333333", qualifierClientContainerId = "d".repeat(64),
+                qualifierClientAddress = "10.88.0.3")
+            val removal = RestoredBridgeResult("r-444444444444", "e".repeat(64), "remove",
+                "f".repeat(64), "1".repeat(64))
+            ReleasePrivateFiles.save(path.resolve("${removal.operation}.result.json"), json.encodeToString(removal).toByteArray())
+            val isolationSha = ReleaseLocks.sha256(ReleasePrivateFiles.read(member.resolve("isolate.result.json")))
+            val digest = ReleaseLocks.sha256(json.encodeToString(removal).toByteArray() + isolationSha.toByteArray())
+            val bytes = json.encodeToString(BridgeResumeProof(binding, removal, isolationSha, digest)).toByteArray()
+            val result = path.resolve("${removal.operation}.resume-proof.json")
+            ReleasePrivateFiles.save(result, bytes)
+            return ActivationInput(result.toString(), ReleaseLocks.sha256(bytes))
+        }
+    }
+    private val restoredVerifier = RestoredReleaseVerifier { proof, invocation, operation, source, target, owned ->
+        calls += "verify-restored:$operation:${target.id}"
+        require(!failedRestoredVerification && !owned)
+        val bytes = ReleasePrivateFiles.read(Path.of(proof.path))
+        require(ReleaseLocks.sha256(bytes) == proof.sha256)
+        val record = Json.parseToJsonElement(bytes.decodeToString()).jsonObject
+        require(record.keys == setOf("unitFixture", "operation", "invocation", "source", "target", "legacyBridge", "held", "sourceResume", "isolation") &&
+            record["unitFixture"] == JsonPrimitive(true) && record["operation"] == JsonPrimitive(operation) &&
+            record["invocation"] == Json.encodeToJsonElement(invocation.input) &&
+            record["source"] == Json.encodeToJsonElement(source) && record["target"] == Json.encodeToJsonElement(target))
+        for (name in listOf("legacyBridge", "held", "sourceResume", "isolation")) {
+            val original = json.decodeFromJsonElement<ActivationInput>(record.getValue(name))
+            require(ReleaseLocks.sha256(ReleasePrivateFiles.read(Path.of(original.path))) == original.sha256)
+        }
+        val binding = Json.parseToJsonElement(ReleasePrivateFiles.read(Path.of(invocation.input.path)).decodeToString()).jsonObject
+        require(binding["generationId"] == JsonPrimitive(target.id) && binding["phase"] == JsonPrimitive("RESTORE"))
+    }
+    fun control(tx: ReleaseTransactionRequest = request): ReleaseGenerationControl = object : ReleaseGenerationControl by
+        NativeReleaseControl(tx, runtime, acceptance, ::restore, operations, base, journeys, restoredVerifier) {
+        override fun retireInstalledAfterCommittedSite() { calls += "retire-install-site" }
+        override fun retireOwnedAfterCommittedSite() { calls += "retire-owned-references" }
+        override fun retireOwnedAfterRollback() { calls += "retire-owned-rollback" }
+    }
+    fun dispatcher(controls: ((ReleaseTransactionRequest, Path) -> ReleaseGenerationControl)? = null,
+        bridge: Boolean = true) = ReleaseDispatch(transactions,
         runtime, controls ?: { tx, _ -> control(tx) }, acceptance, ::restore,
         { _, _ -> object : ReleasePublicationControl {
             override fun pause() { calls += "pause" }
             override fun release() { calls += "release" }
-        } }, { caddy }, { _, journal, _ -> object : ReleaseActivationAuthorization {
+        } }, { caddy }, { _, journal, _ -> object : ReleaseActiveSiteAuthorization {
             override fun verify(binding: ReleaseActivationBinding): String {
                 assertEquals(Phase.ACCEPTED, TransactionJournal.verify(journal).last().phase); calls += "verify-permit"; return "f".repeat(64)
             }
             override fun consume(binding: ReleaseActivationBinding, permitSha256: String, activationJournalHead: String) {
                 assertEquals(activationJournalHead, TransactionJournal.verify(journal).last().hash); calls += "consume-permit"
             }
-        } }, operations)
+            override fun select(binding: ReleaseActivationBinding, permitSha256: String,
+                activationJournalHead: String, qualificationSnapshotId: String): String {
+                assertEquals(qualifiedCapture, qualificationSnapshotId)
+                assertEquals(Phase.ACTIVATION_STARTED, TransactionJournal.verify(journal).last().phase)
+                calls += "select-site"; return "e".repeat(64)
+            }
+            override fun finalize(binding: ReleaseActivationBinding, committed: JournalRecord, selectionSha256: String) {
+                assertEquals(Phase.COMMITTED, committed.phase); assertEquals("e".repeat(64), selectionSha256)
+                calls += "finalize-site"
+            }
+        } }, operations, base, if (bridge) journeys else null)
     fun evidence() = ActivationEvidenceBinding(inventoryPin, manifest, products, products, acceptanceJournal.path, "b".repeat(64), "a".repeat(64))
     val journal: Path get() = transactions.resolve("unit/transaction.jsonl")
     override fun close() { Thread.interrupted(); Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }

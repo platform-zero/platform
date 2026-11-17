@@ -1,7 +1,9 @@
 package net.datamancy.platform
 
 import java.nio.file.Path
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 
 /** Bounded native Hub spawning into separately confined, preallocated notebook containers. */
@@ -135,6 +137,91 @@ internal object JupyterHubRuntime {
         """.trimIndent() } + "\n"
         return result
     }
+    /** One native Hub and two preallocated, separately owned single-user homes. No shared SQL/cache clone. */
+    fun canonicalFragment(inventory: AcquiredInventory, name: String): CanonicalProviderFragment {
+        val legacy = spec(inventory, name)
+        val processes = legacy.processes.map { process ->
+            val id = if (process.id == "controller") "hub-controller" else process.id
+            process.copy(id = id, dependencies = process.dependencies.map { if (it == "controller") "hub-controller" else it },
+                environmentFile = process.environmentFile?.let { "jupyterhub-$it" },
+                files = process.files.map { it.copy(file = "jupyterhub-${it.file}") } +
+                    if (process.id == "hub") listOf(RuntimeFile("jupyterhub-ca.pem", "/run/secrets/hub-ca.pem"))
+                    else emptyList(),
+                networks = if (process.id == "hub") listOf("hub-data", "hub-web") else listOf("hub-data"))
+        }
+        val partial = legacy.copy(store = RuntimeStore.CANONICAL_V2, processes = processes,
+            networks = listOf("hub-data", "hub-web"))
+        PrivateDeployment.validate(partial)
+        return CanonicalProviderFragment("jupyterhub", partial, webNetworks = setOf("hub-web"))
+    }
+
+    fun canonicalInputs(onDemandGeneration: String? = null, pki: (String) -> Map<String, String> = {
+        PrivateWebPki.generate(it, if (it == "hub") listOf("hub", "alice.hub", "bob.hub") else listOf(it, "$it.hub"))
+    }): Map<String, String> {
+        if (onDemandGeneration != null) require(onDemandGeneration.matches(Regex("q-[a-f0-9]{12}")))
+        var hubCa: String? = null
+        val original = inputs { host ->
+            pki(host).also { if (host == "hub") hubCa = requireNotNull(it["ca.pem"]) }
+        }
+        // Only canonical V2 exposes the SAME source CA that signs the inner Hub
+        // certificate. COORD copies these exact bytes into the Caddy member's
+        // immutable hub-ca.pem input before sealing; never generate a second CA.
+        val settings = if (onDemandGeneration != null) {
+            val source = Json.parseToJsonElement(original.getValue("hub-settings.json")).jsonObject
+            val servers = source.getValue("servers").jsonObject
+            buildJsonObject {
+                source.forEach { (key, value) -> if (key != "servers") put(key, value) }
+                put("notebookGeneration", onDemandGeneration)
+                put("servers", buildJsonObject { users.forEach { user ->
+                    put(user, buildJsonObject {
+                        servers.getValue(user).jsonObject.forEach { (key, value) -> put(key, value) }
+                        put("parentControlKey", RuntimePreparation.password())
+                    })
+                } })
+            }.toString() + "\n"
+        } else original.getValue("hub-settings.json")
+        return ((original + ("hub-settings.json" to settings)).mapKeys { (file, _) -> "jupyterhub-$file" } +
+            ("jupyterhub-ca.pem" to requireNotNull(hubCa))).mapValues { (name, content) -> when (name) {
+            "jupyterhub-caddyfile" -> content
+                .replace(Regex("(?m)^\\s*@notebooks path /user /user/\\*\\n\\s*respond @notebooks \\\"Use the isolated notebook origin\\\" 403\\n"), "")
+                .replace("reverse_proxy controller:8081", "reverse_proxy hub-controller:8000 {\n" +
+                    "                header_up Host notebooks.datamancy.net\n" +
+                    "                header_up X-Forwarded-Host notebooks.datamancy.net\n" +
+                    "                header_up X-Forwarded-Proto https\n" +
+                    "              }")
+                .replace("not header Origin https://hub:8443", "not header Origin https://notebooks.datamancy.net")
+            "jupyterhub-hub-config.py" -> (if (onDemandGeneration != null) resource("hub-config-r9.py") else content)
+                .replace("c.JupyterHub.public_url = 'https://hub:8443/'",
+                    "c.JupyterHub.public_url = 'https://notebooks.datamancy.net/'")
+                .replace("c.JupyterHub.subdomain_host = 'https://hub:8443'",
+                    "c.JupyterHub.subdomain_host = ''")
+            "jupyterhub-alice.env", "jupyterhub-bob.env" -> content
+                .replace("https://alice.hub:8443/", "https://notebooks.datamancy.net/")
+                .replace("https://bob.hub:8443/", "https://notebooks.datamancy.net/")
+                .replace("JUPYTERHUB_PUBLIC_HUB_URL=https://hub:8443/hub/",
+                    "JUPYTERHUB_PUBLIC_HUB_URL=https://notebooks.datamancy.net/hub/")
+            else -> content
+        } }
+    }
+
+    fun coldRestoreFragment(fresh: CanonicalProviderFragment): CanonicalProviderFragment {
+        require(fresh.product == "jupyterhub" && fresh.spec.processes.none { it.oneShot } &&
+            fresh.spec.processes.map { it.id }.toSet() == setOf("alice", "bob", "hub", "hub-controller"))
+        val projected = fresh.spec.copy(processes = fresh.spec.processes.map { process ->
+            val guard = when (process.id) {
+                "hub-controller" -> "test -s /state/hub.sqlite; test ! -L /state/hub.sqlite; test -s /state/cookie-secret; test ! -L /state/cookie-secret; "
+                "alice", "bob" -> "test -d /home/jovyan/work; test ! -L /home/jovyan/work; " +
+                    "test -f /home/jovyan/.p0-hub-state; test ! -L /home/jovyan/.p0-hub-state; " +
+                    "grep -qx stopped /home/jovyan/.p0-hub-state; test ! -e /home/jovyan/.p0-hub-state.pending; " +
+                    "test ! -L /home/jovyan/.p0-hub-state.pending; "
+                else -> null
+            }
+            if (guard == null) process else process.copy(entrypoint = "/bin/sh", command = listOf("-ec",
+                guard + "exec \"${'$'}@\"", "restored-hub", requireNotNull(process.entrypoint)) + process.command)
+        })
+        return fresh.copy(spec = projected).also { PrivateDeployment.validate(it.spec) }
+    }
+
     /** Same-version cold restore only: no credential, database, home or lifecycle-state regeneration. */
     fun coldRestoreSpec(compiled: PrivateDeploymentSpec): PrivateDeploymentSpec {
         require(compiled.processes.none { it.oneShot } && compiled.processes.map { it.id }.toSet() == (users + listOf("hub", "controller")).toSet())

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Private Donetick signup, chore completion/history and restart readback; no external notifications."""
+if not __debug__:
+    raise SystemExit('Optimized Python refused before imports or effects')
 import argparse
 import datetime
 import ipaddress

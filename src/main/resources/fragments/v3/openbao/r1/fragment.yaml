@@ -1,0 +1,47 @@
+schemaVersion: 2
+id: private-openbao
+revision: 1
+product: openbao
+artifacts: [openbao]
+networks: [bao-private, bao-web]
+exportedInputs: [bao-ca.pem]
+volumes:
+  - {id: bao-data, userId: 1000}
+inputs:
+  - {name: bao.env, owner: openbao, purpose: RUNTIME, consumers: [bao]}
+  - {name: bao.hcl, owner: openbao, purpose: RUNTIME, consumers: [bao]}
+  - {name: bao-ca.pem, owner: openbao, purpose: RUNTIME, consumers: [bao]}
+  - {name: bao-web.pem, owner: openbao, purpose: RUNTIME, consumers: [bao]}
+  - {name: bao-web-key.pem, owner: openbao, purpose: RUNTIME, consumers: [bao]}
+processes:
+  - id: bao
+    artifact: openbao
+    userId: 1000
+    memoryMiB: 1024
+    networks: [bao-private, bao-web]
+    entrypoint: /usr/bin/bao
+    command: [server, '-config=/run/secrets/bao.hcl']
+    environmentFile: bao.env
+    volumes:
+      - {volume: bao-data, target: /bao/data}
+    files:
+      - {file: bao.hcl, target: /run/secrets/bao.hcl}
+      - {file: bao-ca.pem, target: /run/secrets/ca.pem}
+      - {file: bao-web.pem, target: /run/secrets/web.pem}
+      - {file: bao-web-key.pem, target: /run/secrets/web-key.pem}
+    readiness:
+      - /bin/sh
+      - -ec
+      - |
+        set +e
+        status=$(/usr/bin/bao status -format=json 2>/dev/null); code=$?
+        test $code -eq 0 || test $code -eq 2 ||
+        { test $code -eq 1 && printf '%s' "$status" | grep -Eq '"initialized"[[:space:]]*:[[:space:]]*false' && printf '%s' "$status" | grep -Eq '"sealed"[[:space:]]*:[[:space:]]*true'; }
+install:
+  processes: [bao]
+  dependencies:
+    bao: []
+restore:
+  processes: [bao]
+  dependencies:
+    bao: []

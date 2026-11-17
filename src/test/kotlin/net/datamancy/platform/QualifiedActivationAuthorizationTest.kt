@@ -16,6 +16,36 @@ class QualifiedActivationAuthorizationTest {
         val root = Files.createTempDirectory("authority-unit-", PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
         try { action(root) } finally { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
     }
+    @Test fun `distinct signed legacy bootstrap has no invented consumed permit`(): Unit {
+        val source = ReleaseGeneration("q-111111111111", "a".repeat(64))
+        val pin = ActivationInput("/mnt/media/p0-v3/release-bootstrap-anchors/unit.anchor.json", "b".repeat(64))
+        val bootstrap = ActiveSiteBootstrap(approval = pin,
+            signature = pin.copy(path = "/mnt/media/p0-v3/release-bootstrap-anchors/unit.anchor.sig"),
+            nativeInspection = pin.copy(path = "/mnt/media/p0-v3/release-bootstrap-anchors/unit.native.json"),
+            routeObservation = pin.copy(path = "/mnt/media/p0-v3/release-bootstrap-anchors/unit.route.json"),
+            source = source, siteId = "unit", hosts = listOf("boards.datamancy.net"), sitePolicySha256 = h)
+        val bytes = json.encodeToString(bootstrap)
+        assertFalse(bytes.contains("consumedPermitSha256"))
+        assertFalse(bytes.contains("qualificationSnapshotId"))
+        assertFails { json.decodeFromString<ActiveSiteSelection>(bytes) }
+        assertEquals(bootstrap, json.decodeFromString<ActiveSiteBootstrap>(bytes))
+        val selected = ActiveSiteSelection(ordinal = 1, siteId = "unit", hosts = bootstrap.hosts,
+            deployment = ReleaseDeploymentBinding(source.id, source.bundleSha256, h, h),
+            previousHeadSha256 = h, source = source, transactionId = "unit", activationJournalHead = h,
+            consumedPermitSha256 = h, consumptionSha256 = h,
+            qualificationSnapshotId = "cap-111111111111", selectedTrialId = "trial-two")
+        assertFalse(json.encodeToString(selected).contains("fresh"), "Historical selection bytes stay default-omitted")
+    }
+    @Test fun `missing independently pinned original registry cannot be created by read-only site admission`(): Unit = temporary { root ->
+        val registryRoot = root.resolve("active-sites") // Missing on purpose: never create from a caller claim.
+        val transaction = root.resolve("transaction.jsonl")
+        val source = ReleaseGeneration("q-111111111111", "a".repeat(64))
+        val consumed = Path.of("/mnt/media/p0-v3/release-activation-consumptions/q-abcdef123456.consumed.json")
+        val registry = ActiveSiteRegistry(registryRoot, transaction, "unit", setOf("boards.datamancy.net"), source, consumed)
+        assertFails { registry.admitOriginal(deployment) }
+        assertFails { registry.requireCommitted(deployment, requireCompleted = true) }
+        assertFalse(Files.exists(registryRoot))
+    }
     private inner class Fixture(val root: Path) {
         private fun input(name: String, text: String): ActivationInput {
             val path = root.resolve(name); ReleasePrivateFiles.save(path, text.toByteArray()); return ActivationInput(path.toString(), ReleaseLocks.sha256(text.toByteArray()))
@@ -71,7 +101,7 @@ class QualifiedActivationAuthorizationTest {
             { controllerChecks++; check(!changedController) }, { actual, identity -> liveChecks++; assertEquals(deployment, actual); assertEquals(candidate, identity); check(!changedLive) }, process)
         fun claim(permit: String) = TransactionJournal.appendExisting(journal, Phase.ACTIVATION_STARTED, "cap-000000000002", binding.acceptedJournalHead, permit).hash
     }
-    @Test fun `production bridge rechecks pinned inputs controller live binding and durable single use before returning`() = temporary { root ->
+    @Test fun `production bridge rechecks pinned inputs controller live binding and durable single use before returning`(): Unit = temporary { root ->
         val f = Fixture(root); val authority = f.authority()
         assertFails { f.authority(f.evidence.copy(acceptanceControllerSha256 = "b".repeat(64))).verify(f.binding) }
         val permit = authority.verify(f.binding); val claim = f.claim(permit)
@@ -82,7 +112,7 @@ class QualifiedActivationAuthorizationTest {
         assertFails { authority.verify(f.binding) }
         assertEquals(Phase.ACTIVATION_STARTED, TransactionJournal.verify(f.journal).last().phase) // Authority does not commit or open writes.
     }
-    @Test fun `stale transaction changed controller live bindings definitions and foreign responses refuse authorization`() {
+    @Test fun `stale transaction changed controller live bindings definitions and foreign responses refuse authorization`(): Unit {
         for (failure in listOf("head", "controller", "live", "input", "exit", "malformed")) temporary { root ->
             val f = Fixture(root); val authority = f.authority()
             when (failure) {
@@ -95,7 +125,7 @@ class QualifiedActivationAuthorizationTest {
             assertFalse(Files.exists(root.resolve("${deployment.generationId}.consumed.json")))
         }
     }
-    @Test fun `consumption never trusts acknowledgements without durable exact receipt and never replays unknown effects`() {
+    @Test fun `consumption never trusts acknowledgements without durable exact receipt and never replays unknown effects`(): Unit {
         for (mode in listOf("no-persistence", "foreign-receipt", "lost-consume-ack", "live")) temporary { root ->
             val f = Fixture(root); val authority = f.authority(); val permit = authority.verify(f.binding); val claim = f.claim(permit)
             assertFails { authority.consume(f.binding, "b".repeat(64), claim) }
@@ -107,7 +137,7 @@ class QualifiedActivationAuthorizationTest {
             assertFails { authority.verify(f.binding) }
         }
     }
-    @Test fun `local verifier subprocess is bounded and uses a clean environment`() = temporary { root ->
+    @Test fun `local verifier subprocess is bounded and uses a clean environment`(): Unit = temporary { root ->
         fun script(name: String, text: String): Path {
             val path = root.resolve(name); Files.writeString(path, "#!/bin/sh\n$text\n")
             Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rwx------")); return path

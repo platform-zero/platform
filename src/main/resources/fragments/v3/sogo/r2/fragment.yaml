@@ -1,0 +1,89 @@
+schemaVersion: 2
+id: private-sogo-mail-groupware
+revision: 2
+product: sogo
+artifacts: [postgres-timescale, sogo]
+providers: [postgres, memcached, mailserver, caddy]
+providerProcesses:
+  postgres: [postgres]
+  memcached: [memcached]
+  mailserver: [mail]
+  caddy: [caddy]
+networks: [db-admin, sogo-data, sogo-cache, sogo-web, mail-data]
+providerNetworks:
+  postgres: [db-admin, sogo-data]
+  memcached: [sogo-cache]
+  mailserver: [mail-data]
+  caddy: [sogo-web]
+webNetworks: [sogo-web]
+exportedInputs: [sogo-ca.pem]
+volumes:
+  - {id: sogo-home, userId: 994}
+inputs:
+  - {name: sogo-db-admin.env, owner: sogo, purpose: BOOTSTRAP, consumers: [sogo-db-init]}
+  - {name: sogo-setup.sql, owner: sogo, purpose: BOOTSTRAP, consumers: [sogo-db-init]}
+  - {name: postgres-ca.pem, owner: postgres, purpose: RUNTIME, consumers: [sogo-db-init, sogod]}
+  - {name: sogo.env, owner: sogo, purpose: RUNTIME, consumers: [sogod]}
+  - {name: sogo.conf, owner: sogo, purpose: RUNTIME, consumers: [sogod]}
+  - {name: mail-ca.pem, owner: mailserver, purpose: RUNTIME, consumers: [sogod]}
+  - {name: sogo-web.env, owner: sogo, purpose: RUNTIME, consumers: [groupware]}
+  - {name: sogo-apache.conf, owner: sogo, purpose: RUNTIME, consumers: [groupware]}
+  - {name: sogo-web.pem, owner: sogo, purpose: RUNTIME, consumers: [groupware]}
+  - {name: sogo-web-key.pem, owner: sogo, purpose: RUNTIME, consumers: [groupware]}
+  - {name: sogo-ca.pem, owner: sogo, purpose: RUNTIME, consumers: [groupware]}
+processes:
+  - id: sogo-db-init
+    artifact: postgres-timescale
+    userId: 999
+    oneShot: true
+    networks: [db-admin]
+    entrypoint: /usr/lib/postgresql/17/bin/psql
+    command: [-X, -v, 'ON_ERROR_STOP=1', -f, /run/secrets/sogo-setup.sql]
+    environmentFile: sogo-db-admin.env
+    files:
+      - {file: sogo-setup.sql, target: /run/secrets/sogo-setup.sql}
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+  - id: sogod
+    artifact: sogo
+    userId: 994
+    memoryMiB: 1536
+    networks: [sogo-data, sogo-cache, sogo-web, mail-data]
+    entrypoint: /bin/bash
+    command: [-ec, '. /usr/share/GNUstep/Makefiles/GNUstep.sh; exec /usr/local/sbin/sogod -WONoDetach YES -WOLogFile - -WOPidFile /tmp/sogod.pid']
+    environmentFile: sogo.env
+    volumes:
+      - {volume: sogo-home, target: /home/sogo}
+    files:
+      - {file: sogo.conf, target: /etc/sogo/sogo.conf}
+      - {file: postgres-ca.pem, target: /run/secrets/db-ca.pem}
+      - {file: mail-ca.pem, target: /etc/ssl/certs/ca-certificates.crt}
+    readiness: [/usr/bin/curl, --fail, --silent, --max-time, '3', 'http://127.0.0.1:20000/SOGo/']
+  - id: groupware
+    artifact: sogo
+    userId: 994
+    memoryMiB: 384
+    networks: [sogo-web]
+    entrypoint: /usr/sbin/apache2
+    command: [-f, /run/secrets/apache.conf, -DFOREGROUND]
+    environmentFile: sogo-web.env
+    files:
+      - {file: sogo-apache.conf, target: /run/secrets/apache.conf}
+      - {file: sogo-web.pem, target: /run/secrets/web.pem}
+      - {file: sogo-web-key.pem, target: /run/secrets/web-key.pem}
+      - {file: sogo-ca.pem, target: /run/secrets/ca.pem}
+    readiness: [/usr/bin/curl, --fail, --silent, --max-time, '3', --cacert, /run/secrets/ca.pem, 'https://groupware:8443/SOGo/']
+install:
+  processes: [sogo-db-init, sogod, groupware]
+  dependencies:
+    sogo-db-init: [postgres]
+    sogod: [sogo-db-init, memcached, mail]
+    groupware: [sogod, caddy]
+  databaseAccess:
+    - {consumer: sogod, provider: postgres, volume: postgres, database: sogo, principal: sogo, credentialFile: sogo.env, network: sogo-data}
+restore:
+  processes: [sogod, groupware]
+  dependencies:
+    sogod: [postgres, memcached, mail]
+    groupware: [sogod, caddy]
+  databaseAccess:
+    - {consumer: sogod, provider: postgres, volume: postgres, database: sogo, principal: sogo, credentialFile: sogo.env, network: sogo-data}

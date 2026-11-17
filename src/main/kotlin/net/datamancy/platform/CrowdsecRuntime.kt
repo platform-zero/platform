@@ -38,6 +38,38 @@ internal object CrowdsecRuntime {
                 readiness = listOf("/usr/local/bin/cscli", "-c", "/run/secrets/crowdsec.yaml", "lapi", "status"))
         )).also { PrivateDeployment.validate(it) }
     }
+    /** No host firewall attachment, CAPI, unrelated log mount or fake guard endpoint. */
+    fun canonicalFragment(inventory: AcquiredInventory, name: String): CanonicalProviderFragment {
+        val original = spec(inventory, name)
+        val fragment = original.copy(store = RuntimeStore.CANONICAL_V2,
+            networks = listOf("guard-data"), processes = original.processes.map { process ->
+                process.copy(id = if (process.oneShot) "crowdsec-guard-init" else process.id,
+                    dependencies = process.dependencies.map { if (it == "guard-init") "crowdsec-guard-init" else it },
+                    environmentFile = process.environmentFile?.let { "crowdsec-$it" },
+                    files = process.files.map { it.copy(file = "crowdsec-${it.file}") },
+                    networks = listOf("guard-data"))
+            })
+        PrivateDeployment.validate(fragment)
+        return CanonicalProviderFragment("crowdsec", fragment)
+    }
+    /** Same original guard server leaf/CA input bytes; the enrolled bouncer
+     * authenticates with its original scoped API key over pinned server TLS.
+     * No unsupported claim of LAPI mTLS client authentication. */
+    fun canonicalInputs(pki: () -> Map<String,String> = { PrivateWebPki.generate("guard") }): Map<String,String> =
+        inputs(pki).mapKeys { (key, _) -> "crowdsec-$key" }
+    fun coldRestoreFragment(fresh: CanonicalProviderFragment): CanonicalProviderFragment {
+        require(fresh.product == "crowdsec" && fresh.spec.store == RuntimeStore.CANONICAL_V2 &&
+            fresh.spec.processes.map { it.id }.toSet() == setOf("crowdsec-guard-init", "guard") &&
+            fresh.spec.volumes.map { it.id }.toSet() == setOf("data", "config", "logs", "bootstrap"))
+        val daemon = fresh.spec.processes.single { it.id == "guard" }
+        require(daemon.dependencies == listOf("crowdsec-guard-init") &&
+            daemon.command == listOf("-c", "/run/secrets/crowdsec.yaml") &&
+            daemon.volumes.any { it == RuntimeMount("data", "/data") })
+        return fresh.copy(spec = fresh.spec.copy(processes = listOf(daemon.copy(dependencies = emptyList())),
+            unmountedRecoveryVolumes = setOf("bootstrap")).also {
+            PrivateDeployment.validate(it)
+        })
+    }
     fun prepare(inventory: AcquiredInventory, base: Path = PrivateDeployment.BASE, name: String = "crowdsec", store: RuntimeStore = RuntimeStore.LEGACY): Path =
         RuntimePreparation.prepare(spec(inventory, name).copy(store = store), base) { inputs() }
     fun inputs(pki: () -> Map<String, String> = { PrivateWebPki.generate("guard") }): Map<String, String> = pki() + mapOf(

@@ -1,0 +1,12 @@
+schemaVersion: 2
+id: canonical-shared-core-v3
+revision: 6
+fragments:
+  - {id: postgres-timescale, revision: 1}
+  - {id: forgejo-postgres, revision: 4}
+  - {id: shared-valkey, revision: 1}
+  - {id: shared-ntfy, revision: 1}
+  - {id: planka-postgres, revision: 1}
+  - {id: shared-mariadb, revision: 1}
+  - {id: shared-memcached, revision: 1}
+  - {id: identity-keycloak, revision: 3}

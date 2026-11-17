@@ -2,6 +2,8 @@
 """Real private Alloy -> Loki -> Grafana and Prometheus/Alertmanager journeys, plus restart persistence.
 No public routes, host log mounts, external receivers, or full-stack acceptance claims.
 """
+if not __debug__:
+    raise SystemExit('Optimized Python refuses effectful observability journey before imports')
 import argparse
 import base64
 import datetime

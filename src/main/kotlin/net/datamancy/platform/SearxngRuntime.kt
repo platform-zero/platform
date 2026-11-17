@@ -25,6 +25,48 @@ internal object SearxngRuntime {
                 apparmorProfile = "p0v3-private-v1", memoryMiB = 256, readinessHttpPort = 8080, readinessHttpPath = "/healthz")
         )).also { PrivateDeployment.validate(it) }
     }
+    /** Exact private corpus fixture, original settings secret and native TLS frontend. */
+    fun canonicalFragment(inventory: AcquiredInventory, name: String): CanonicalProviderFragment {
+        val original = spec(inventory, name)
+        val fragment = original.copy(store = RuntimeStore.CANONICAL_V2,
+            networks = listOf("search-data", "search-web"), processes = original.processes.map { process ->
+                process.copy(id = if (process.oneShot) "searxng-corpus-init" else if (process.id == "search")
+                        "searxng-web" else process.id,
+                    dependencies = process.dependencies.map {
+                        when (it) { "corpus-init" -> "searxng-corpus-init"; "search" -> "searxng-web"; else -> it }
+                    }, environmentFile = process.environmentFile?.let { "searxng-$it" },
+                    files = process.files.map { it.copy(file = "searxng-${it.file}") },
+                    networks = if (process.id == "search") listOf("search-data", "search-web") else listOf("search-data"))
+            })
+        PrivateDeployment.validate(fragment)
+        return CanonicalProviderFragment("searxng", fragment, webNetworks = setOf("search-web"))
+    }
+    fun canonicalInputs(pki: () -> Map<String, String> = {
+        PrivateWebPki.generate("search", dnsNames = listOf("search", "search.datamancy.net"))
+    }): Map<String, String> = inputs(pki).mapKeys { (key, _) -> "searxng-$key" }
+        .mapValues { (key, value) -> when (key) {
+            "searxng-settings.yml" -> {
+                require("base_url: https://search:8443/" in value)
+                value.replace("base_url: https://search:8443/", "base_url: https://search.datamancy.net/")
+            }
+            "searxng-nginx.conf" -> {
+                require("server_name search;" in value)
+                value.replace("server_name search;", "server_name search search.datamancy.net;")
+            }
+            else -> value
+        } }
+    fun coldRestoreFragment(fresh: CanonicalProviderFragment): CanonicalProviderFragment {
+        require(fresh.product == "searxng" && fresh.spec.store == RuntimeStore.CANONICAL_V2 &&
+            fresh.spec.processes.map { it.id }.toSet() == setOf("searxng-corpus-init", "searxng", "searxng-web") &&
+            fresh.spec.volumes.map { it.id } == listOf("corpus"))
+        val server = fresh.spec.processes.single { it.id == "searxng" }
+        val web = fresh.spec.processes.single { it.id == "searxng-web" }
+        require(server.dependencies == listOf("searxng-corpus-init") && web.dependencies == listOf("searxng") &&
+            server.volumes == listOf(RuntimeMount("corpus", "/corpus")))
+        val projected = fresh.spec.copy(processes = listOf(server.copy(dependencies = emptyList()), web))
+        PrivateDeployment.validate(projected)
+        return fresh.copy(spec = projected)
+    }
     fun prepare(inventory: AcquiredInventory, base: Path = PrivateDeployment.BASE, name: String = "searxng", store: RuntimeStore = RuntimeStore.LEGACY): Path =
         RuntimePreparation.prepare(spec(inventory, name).copy(store = store), base) { inputs() }
 

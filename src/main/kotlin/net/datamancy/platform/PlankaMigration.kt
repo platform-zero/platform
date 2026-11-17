@@ -40,11 +40,39 @@ internal class PlankaMigration(private val root: Path, private val commands: Run
               if (after[1].length !== 0) throw new Error('Pending migrations');
             } finally { await knex.destroy(); } })().catch(() => { process.exitCode = 1; });
         """.trimIndent()
+        /** Extract ONLY the original retired migration principal's DB URL, never its bootstrap
+         * administrator credential or PostgreSQL root env. The source bytes must match the
+         * immutable original bundle and the synthesized file is CREATE_NEW under a private intent.
+         */
+        fun prepareEnvironment(original: GenerationBundle, runtimeBase: Path, destination: Path): ActivationInput {
+            require(original.request.store == RuntimeStore.CANONICAL_V2 && original.ownedUpdate == null &&
+                original.recoverySourceKopia == null && original.recoverySourceArchiveSha256 == null)
+            val owner = original.members.single { pin -> pin.spec.processes.any { it.id == "planka" } }
+            val initializer = owner.spec.processes.single { it.id == "planka-init" }
+            require(initializer.oneShot && initializer.environmentFile == "planka-bootstrap.env" &&
+                owner.spec.processes.single { it.id == "planka" }.environmentFile == "planka.env")
+            val source = runtimeBase.resolve(owner.spec.name).resolve("planka-bootstrap.env")
+            val bytes = ReleasePrivateFiles.read(source)
+            require(ReleaseLocks.sha256(bytes) == owner.inputHashes.getValue("planka-bootstrap.env")) {
+                "Original migration principal cannot be replaced or regenerated"
+            }
+            val env = bytes.decodeToString(throwOnInvalidSequence = true)
+            val urls = env.lineSequence().filter { it.startsWith("DATABASE_URL=") }.toList()
+            require(urls.size == 1 && urls.single().matches(Regex(
+                "DATABASE_URL=postgresql://planka_migrate:[a-f0-9]{64}@postgres:5432/planka\\?sslmode=verify-full")) &&
+                env.lineSequence().count { it == "NODE_EXTRA_CA_CERTS=/run/secrets/postgres-ca.pem" } == 1 &&
+                env.lineSequence().count { it.startsWith("DEFAULT_ADMIN_PASSWORD=") } == 1)
+            val ca = ReleasePrivateFiles.read(runtimeBase.resolve(owner.spec.name).resolve("postgres-ca.pem"))
+            require(ReleaseLocks.sha256(ca) == owner.inputHashes.getValue("postgres-ca.pem"))
+            val sanitized = urls.single() + "\nNODE_EXTRA_CA_CERTS=/run/secrets/postgres-ca.pem\n"
+            ReleasePrivateFiles.save(destination, sanitized.toByteArray())
+            return ActivationInput(destination.toString(), ReleaseLocks.sha256(sanitized.toByteArray()))
+        }
         fun real(root: Path, store: RuntimeStore) = PlankaMigration(root, PrivateRootfulCommands(120, store = store)) { spec, fence ->
             val runtime = PrivateDeployment.real()
             val observed = runtime.audit(spec, false)
             require(observed.maintenanceId == fence && observed.statuses.all {
-                if (it.id == "postgres") it.state == "running" else it.state in setOf("exited", "completed", "configured", "created")
+                if (it.id == "postgres") it.state == "running" else it.state in setOf("absent", "exited", "completed", "configured", "created")
             }) { "Migration requires an isolated staged database, no application writers" }
         }
         fun requireRollbackSafe(phase: Phase, from: String, to: String) {

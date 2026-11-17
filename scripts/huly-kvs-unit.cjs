@@ -2,7 +2,11 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { bridge, validateConnection, logSink } = require('../src/main/resources/runtime/huly-kvs-proxy.cjs');
+const kafka = require('../src/main/resources/runtime/huly-kafka-bridge.cjs');
 class Socket extends EventEmitter {
   constructor() { super(); this.writes = []; this.pipes = []; this.authorized = true; }
   pause() { this.paused = true; }
@@ -19,6 +23,60 @@ function fixture() {
   });
   return { client, remote, secure, calls, tlsCalls, finish, closed: () => closed };
 }
+test('generation-local Kafka bridge never forwards native bytes before verified Redpanda mTLS', () => {
+  const client = new Socket(), upstream = new Socket(), calls = [];
+  client.remoteAddress = '127.0.0.1'; client.resume = () => { client.resumed = true; };
+  client.setNoDelay = value => { client.noDelay = value; };
+  const end = kafka.bridge(client,
+    { ca: Buffer.from('ca'), cert: Buffer.from('app-cert'), key: Buffer.from('app-key') },
+    options => { calls.push(options); return upstream; }, () => ({ unref() {} }));
+  assert.equal(client.paused, true); assert.equal(client.pipes.length, 0);
+  assert.equal(calls[0].host, 'huly-redpanda'); assert.equal(calls[0].port, 9092);
+  assert.equal(calls[0].servername, 'huly-redpanda');
+  assert.equal(calls[0].rejectUnauthorized, true); assert.equal(calls[0].minVersion, 'TLSv1.2');
+  assert.equal(calls[0].cert.toString(), 'app-cert'); assert.equal(calls[0].key.toString(), 'app-key');
+  upstream.emit('secureConnect');
+  assert.equal(client.resumed, true); assert.equal(client.noDelay, true);
+  assert.deepEqual(client.pipes, [upstream]); assert.deepEqual(upstream.pipes, [client]);
+  end(); assert.equal(client.destroyed, true); assert.equal(upstream.destroyed, true);
+});
+test('Kafka TLS authentication failure destroys both endpoints without fallback or replay', () => {
+  for (const fail of ['unauthorized', 'error', 'timeout']) {
+    const client = new Socket(), upstream = new Socket(); client.resume = () => {};
+    client.setNoDelay = () => {};
+    upstream.authorized = false;
+    let deadline;
+    const finish = kafka.bridge(client,
+      { ca: Buffer.from('ca'), cert: Buffer.from('app'), key: Buffer.from('key') },
+      () => upstream, callback => { deadline = callback; return {}; });
+    if (fail === 'unauthorized') upstream.emit('secureConnect');
+    if (fail === 'error') upstream.emit('error', Error('certificate refused'));
+    if (fail === 'timeout') deadline();
+    assert.equal(client.pipes.length, 0); assert.equal(upstream.pipes.length, 0);
+    assert.equal(client.destroyed, true); assert.equal(upstream.destroyed, true);
+    finish();
+  }
+  const oldConfig = process.env.QUEUE_CONFIG, oldBridge = process.env.HULY_KAFKA_BRIDGE;
+  try {
+    process.env.QUEUE_CONFIG = 'redpanda:9092'; process.env.HULY_KAFKA_BRIDGE = 'v2';
+    assert.throws(() => kafka.start(), /Foreign Huly Kafka listener/);
+  } finally {
+    if (oldConfig === undefined) delete process.env.QUEUE_CONFIG; else process.env.QUEUE_CONFIG = oldConfig;
+    if (oldBridge === undefined) delete process.env.HULY_KAFKA_BRIDGE; else process.env.HULY_KAFKA_BRIDGE = oldBridge;
+  }
+});
+test('Kafka certificate path refuses symlink and group-writable private key inputs', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'p0v3-kafka-pem-'));
+  try {
+    const file = path.join(root, 'key.pem');
+    fs.writeFileSync(file, Buffer.alloc(256, 0x61), { mode: 0o600 });
+    assert.equal(kafka.material(file).length, 256);
+    const alias = path.join(root, 'alias.pem'); fs.symlinkSync(file, alias);
+    assert.throws(() => kafka.material(alias));
+    fs.chmodSync(file, 0o662);
+    assert.throws(() => kafka.material(file));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 test('no native bytes forwarded before PostgreSQL SSL negotiation and verified TLS', () => {
   const f = fixture(); assert(f.client.paused); assert.equal(f.client.pipes.length, 0);
   f.remote.emit('connect'); assert.deepEqual(f.calls, [{ host: 'cockroach', port: 26257 }]);

@@ -3,9 +3,11 @@ package net.datamancy.platform
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermission
+import java.nio.file.attribute.PosixFilePermissions
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class RssStateStoreTest {
@@ -17,6 +19,36 @@ class RssStateStoreTest {
             Files.list(dir).use { it.forEach(Files::delete) }
             Files.delete(dir)
         }
+    }
+    @Test fun `direct managed checkpoint and confirm writer cannot bypass enrolled scheduler or global exclusion`(): Unit {
+        val root = Files.createTempDirectory("rss-managed-state-")
+        Files.setPosixFilePermissions(root, PosixFilePermissions.fromString("rwx------"))
+        fun dir(parent: Path, name: String): Path = Files.createDirectory(parent.resolve(name),
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+        try {
+            val generations = dir(root, "generations")
+            val generation = dir(generations, "q-123456789abc")
+            val rss = dir(generation, "rss")
+            val state = dir(rss, "state")
+            val scope = GenerationRssOperations(generations)
+            val store = RssStateStore(state, generations, scope)
+            store.initializeFresh()
+            val feed = RssPacks.load().first()
+            store.checkpointWithReview(feed, listOf(old), PollGate.STAGING, 1000, true)
+            val original = Files.readAllBytes(state.resolve("rss-state.json"))
+            var fetchAttempted = false
+            store.withWriteAdmission { fetchAttempted = true; assertEquals(store.read(), store.read()) }
+            assertTrue(fetchAttempted)
+            dir(rss, "schedule") // Incomplete enrollment is not a license to write or reset.
+            fetchAttempted = false
+            assertFailsWith<Exception> { store.withWriteAdmission { fetchAttempted = true } }
+            assertFalse(fetchAttempted) // Outer admission fails BEFORE even a read-only network fetch.
+            assertFailsWith<Exception> { store.checkpointWithReview(feed, listOf(old, next), PollGate.STAGING, 2000, true) }
+            assertFailsWith<Exception> { store.claim(PendingRssPost(DraftPost(feed.pack, feed.feed.id,
+                feed.feed.account, "new", "a".repeat(64), "Synthetic"), 1000), 2000) }
+            assertFailsWith<Exception> { store.initializeFresh() }
+            assertTrue(original.contentEquals(Files.readAllBytes(state.resolve("rss-state.json"))))
+        } finally { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
     }
     private val old = FeedItem("old", "Old article", "https://example.org/old")
     private val next = FeedItem("new", "New article", "https://example.org/new")

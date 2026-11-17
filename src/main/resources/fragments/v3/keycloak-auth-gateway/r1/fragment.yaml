@@ -1,0 +1,39 @@
+schemaVersion: 2
+id: private-keycloak-auth-gateway
+revision: 1
+product: keycloak-auth-gateway
+artifacts: [keycloak-auth-gateway]
+providers: [keycloak, caddy, valkey]
+providerProcesses:
+  keycloak: [keycloak]
+  caddy: [caddy]
+  valkey: [valkey]
+networks: [auth-gateway-web, identity-web, cache-private]
+providerNetworks:
+  keycloak: [identity-web]
+  caddy: [auth-gateway-web, identity-web]
+  valkey: [cache-private]
+webNetworks: [auth-gateway-web]
+inputs:
+  - {name: auth-gateway.env, owner: keycloak-auth-gateway, purpose: RUNTIME, consumers: [auth-gateway]}
+  - {name: identity-ca.pem, owner: keycloak, purpose: RUNTIME, consumers: [auth-gateway]}
+processes:
+  - id: auth-gateway
+    artifact: keycloak-auth-gateway
+    userId: 65532
+    memoryMiB: 256
+    entrypoint: /bin/oauth2-proxy
+    environmentFile: auth-gateway.env
+    files:
+      - {file: identity-ca.pem, target: /run/secrets/identity-ca.pem}
+    readinessHttpPort: 4180
+    readinessHttpPath: /ping
+    networks: [auth-gateway-web, identity-web, cache-private]
+install:
+  processes: [auth-gateway]
+  dependencies:
+    auth-gateway: [keycloak, caddy, valkey]
+restore:
+  processes: [auth-gateway]
+  dependencies:
+    auth-gateway: [keycloak, caddy, valkey]

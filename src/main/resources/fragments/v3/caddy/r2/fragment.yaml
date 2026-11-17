@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 2,
+  "id": "private-caddy",
+  "revision": 2,
+  "product": "caddy",
+  "artifacts": [
+    "caddy"
+  ],
+  "networks": [
+    "ingress-control"
+  ],
+  "volumes": [
+    {
+      "id": "caddy-data",
+      "userId": 1000
+    },
+    {
+      "id": "caddy-config",
+      "userId": 1000
+    }
+  ],
+  "inputs": [
+    {
+      "name": "caddy.env",
+      "owner": "caddy",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "caddy"
+      ]
+    },
+    {
+      "name": "caddy.json",
+      "owner": "caddy",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "caddy"
+      ]
+    },
+    {
+      "name": "opensearch-reader.pem",
+      "owner": "opensearch",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "caddy"
+      ]
+    },
+    {
+      "name": "opensearch-reader-key.pem",
+      "owner": "opensearch",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "caddy"
+      ]
+    }
+  ],
+  "processes": [
+    {
+      "id": "caddy",
+      "artifact": "caddy",
+      "userId": 1000,
+      "memoryMiB": 256,
+      "networks": [
+        "ingress-control"
+      ],
+      "volumes": [
+        {
+          "volume": "caddy-data",
+          "target": "/data"
+        },
+        {
+          "volume": "caddy-config",
+          "target": "/config"
+        }
+      ],
+      "entrypoint": "/usr/bin/caddy",
+      "command": [
+        "run",
+        "--config",
+        "/run/secrets/caddy.json"
+      ],
+      "environmentFile": "caddy.env",
+      "files": [
+        {
+          "file": "caddy.json",
+          "target": "/run/secrets/caddy.json"
+        },
+        {
+          "file": "opensearch-reader.pem",
+          "target": "/run/secrets/opensearch-reader.pem"
+        },
+        {
+          "file": "opensearch-reader-key.pem",
+          "target": "/run/secrets/opensearch-reader-key.pem"
+        }
+      ],
+      "readiness": [
+        "/usr/bin/wget",
+        "-q",
+        "-O",
+        "/dev/null",
+        "http://127.0.0.1:2019/config/"
+      ]
+    }
+  ],
+  "install": {
+    "processes": [
+      "caddy"
+    ],
+    "dependencies": {
+      "caddy": []
+    }
+  },
+  "restore": {
+    "processes": [
+      "caddy"
+    ],
+    "dependencies": {
+      "caddy": []
+    }
+  },
+  "providers": [
+    "opensearch"
+  ]
+}

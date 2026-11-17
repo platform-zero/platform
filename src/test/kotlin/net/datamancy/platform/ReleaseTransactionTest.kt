@@ -21,15 +21,18 @@ class ReleaseTransactionTest {
             Files.delete(dir)
         }
     }
-    private class Fake(var failAt: String? = null) : ReleaseEffects {
+    private val update = ReleaseUpdateBinding("q-111111111111", hash, deployment.generationId,
+        "e".repeat(64), deployment.sitePolicySha256, "f".repeat(64))
+    private class Fake(var failAt: String? = null) : ReleaseEffects, ReleaseUpdateEffects, ReleaseQualificationSnapshotEffects {
         val calls = mutableListOf<String>()
         var failAlso: String? = null
+        var ownedJournal: Path? = null
         private fun call(name: String) {
             calls += name
             if (name == failAt || name == failAlso) throw IllegalStateException("injected $name")
             if ("interrupt-$name" == failAt) throw InterruptedException("unit interruption")
         }
-        fun authorization(path: Path) = object : ReleaseActivationAuthorization {
+        fun authorization(path: Path) = object : ReleaseActiveSiteAuthorization {
             override fun verify(binding: ReleaseActivationBinding): String {
                 assertEquals(Phase.ACCEPTED, TransactionJournal.verify(path).last().phase)
                 call("verify-permit")
@@ -42,6 +45,20 @@ class ReleaseTransactionTest {
                 assertEquals(permitSha256, record.activationPermitSha256)
                 assertEquals(activationJournalHead, record.hash)
                 call("consume-permit")
+            }
+            override fun select(binding: ReleaseActivationBinding, permitSha256: String,
+                activationJournalHead: String, qualificationSnapshotId: String): String {
+                assertEquals(Phase.ACTIVATION_STARTED, TransactionJournal.verify(path).last().phase)
+                assertEquals("cap-222222222222", qualificationSnapshotId)
+                assertEquals("f".repeat(64), permitSha256)
+                call("select-site")
+                return "e".repeat(64)
+            }
+            override fun finalize(binding: ReleaseActivationBinding, committed: JournalRecord, selectionSha256: String) {
+                assertEquals(Phase.COMMITTED, committed.phase)
+                assertEquals(committed, TransactionJournal.verify(path).last())
+                assertEquals("e".repeat(64), selectionSha256)
+                call("finalize-site")
             }
         }
         fun reviewer() = object : ReleaseQualification {
@@ -57,17 +74,33 @@ class ReleaseTransactionTest {
         override fun snapshotCoordinated(): String { call("snapshot"); return "snapshot-one" }
         override fun verifySnapshotAndIsolatedFunctionalRestore(snapshotId: String) = call("restore-test")
         override fun migrateStaged() = call("migrate")
+        override fun bindStagedDeployment(snapshotId: String): ReleaseDeploymentBinding {
+            call("bind-staged")
+            return ReleaseDeploymentBinding("q-abcdef123456", "b".repeat(64), "c".repeat(64), "d".repeat(64))
+        }
+        override fun verifyQualificationSnapshot(): String = "cap-222222222222"
         override fun restrictPublicWritesToAcceptance() = call("restrict")
         override fun loadAllApprovedHostsOnce() = call("load-caddy")
         override fun openPublicWrites() = call("open-writes")
         override fun releaseOutbound() = call("release-outbound")
+        override fun retirePreviousAfterCommittedSite() = call("retire-old")
+        override fun retireInstalledAfterCommittedSite() = call("retire-install-site")
         override fun reloadPreviousCaddyConfig() = call("reload-old-caddy")
         override fun isolateCandidate() = call("isolate")
         override fun restoreOldSnapshot(snapshotId: String) = call("restore-old")
-        override fun verifyOldStack() = call("verify-old")
+        override fun verifyOldStack() {
+            ownedJournal?.let { require(TransactionJournal.verify(it).last().phase == Phase.RECOVERY_REQUIRED) {
+                "Source resume occurred before durable rollback journal terminal"
+            } }
+            call("verify-old")
+        }
     }
     private fun ReleaseTransaction(path: Path, fake: Fake) = ReleaseTransaction(path, fake, fake.reviewer())
-    @Test fun `clean install keeps public closed until backup restore and real journeys pass`() = temporary { path ->
+    private fun owned(path: Path, fake: Fake, id: String = "tx-two", digest: String = hash): JournalRecord {
+        fake.ownedJournal = path
+        return ReleaseTransaction(path, fake).execute(id, digest, update.sourceGeneration, update = update)
+    }
+    @Test fun `clean install keeps public closed until backup restore and real journeys pass`(): Unit = temporary { path ->
         val fake = Fake()
         val last = ReleaseTransaction(path, fake).execute("tx-one", hash, null)
         assertEquals(Phase.ACCEPTED, last.phase)
@@ -85,9 +118,20 @@ class ReleaseTransactionTest {
         assertFailsWith<IllegalArgumentException> { ReleaseTransaction(path, fake).activate("tx-one", hash, last.hash, fake.authorization(path)) }
         assertFailsWith<IllegalArgumentException> { ReleaseTransaction(path, Fake()).execute("tx-two", hash, null) }
     }
-    @Test fun `update freezes before coordinated backup and migration`() = temporary { path ->
+    @Test fun `untyped legacy update cannot freeze or acquire deployment authority`(): Unit = temporary { path ->
         val fake = Fake()
-        val result = ReleaseTransaction(path, fake).execute("tx-two", hash, "old-release")
+        assertFailsWith<IllegalArgumentException> {
+            ReleaseTransaction(path, fake).execute("tx", hash, update.sourceGeneration, deployment)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            ReleaseTransaction(path, fake).execute("tx", hash, update.sourceGeneration)
+        }
+        assertTrue(fake.calls.isEmpty())
+        assertFalse(Files.exists(path))
+    }
+    @Test fun `update freezes before coordinated backup and migration`(): Unit = temporary { path ->
+        val fake = Fake()
+        val result = owned(path, fake)
         assertEquals(Phase.ACCEPTED, result.phase)
         assertTrue(fake.calls.indexOf("freeze") < fake.calls.indexOf("snapshot"))
         assertTrue(fake.calls.indexOf("pause") < fake.calls.indexOf("snapshot"))
@@ -96,29 +140,30 @@ class ReleaseTransactionTest {
         assertEquals(listOf(Phase.PREPARED, Phase.FROZEN, Phase.SNAPSHOT_VERIFIED, Phase.STAGED,
             Phase.CUTOVER_RESTRICTED, Phase.ACCEPTED), TransactionJournal.verify(path).map { it.phase })
     }
-    @Test fun `failures before opening writes isolate candidate restore old snapshot and never release outward jobs`() {
+    @Test fun `failures before opening writes isolate candidate restore old snapshot and never release outward jobs`(): Unit {
         for (step in listOf("stage", "readiness", "migrate", "staged-journeys", "restrict", "load-caddy", "domain-journeys")) {
             temporary { path ->
                 val fake = Fake(step)
-                assertFailsWith<IllegalStateException> { ReleaseTransaction(path, fake).execute("tx-two", hash, "old-release") }
+                assertFailsWith<IllegalStateException> { owned(path, fake) }
                 assertEquals(Phase.RECOVERY_REQUIRED, TransactionJournal.verify(path).last().phase, step)
                 assertTrue("isolate" in fake.calls, step)
+                assertEquals(1, fake.calls.count { it == "pause" }, "A held original cannot be re-claimed on rollback")
                 assertTrue("restore-old" in fake.calls && "verify-old" in fake.calls, step)
                 assertFalse("open-writes" in fake.calls || "release-outbound" in fake.calls, step)
                 if (step in setOf("load-caddy", "domain-journeys")) assertTrue("reload-old-caddy" in fake.calls, step)
             }
         }
     }
-    @Test fun `failed backup or quiesce cannot proceed to migration or public cutover`() {
+    @Test fun `failed backup or quiesce cannot proceed to migration or public cutover`(): Unit {
         for (step in listOf("freeze", "pause", "quiesce", "snapshot", "restore-test")) temporary { path ->
             val fake = Fake(step)
-            assertFailsWith<IllegalStateException> { ReleaseTransaction(path, fake).execute("tx-two", hash, "old-release") }
+            assertFailsWith<IllegalStateException> { owned(path, fake) }
             assertFalse("migrate" in fake.calls || "load-caddy" in fake.calls)
             assertFalse("restore-old" in fake.calls || "verify-old" in fake.calls, "Unverified snapshots cannot drive rollback")
             assertEquals(Phase.RECOVERY_REQUIRED, TransactionJournal.verify(path).last().phase)
         }
     }
-    @Test fun `clean install freeze quiesce or snapshot failure never exposes or resumes the candidate`() {
+    @Test fun `clean install freeze quiesce or snapshot failure never exposes or resumes the candidate`(): Unit {
         for (step in listOf("freeze", "quiesce", "snapshot", "restore-test")) temporary { path ->
             val fake = Fake(step)
             assertFailsWith<IllegalStateException> { ReleaseTransaction(path, fake).execute("new-release", hash, null) }
@@ -129,11 +174,40 @@ class ReleaseTransactionTest {
             assertEquals(Phase.RECOVERY_REQUIRED, TransactionJournal.verify(path).last().phase)
         }
     }
-    @Test fun `possible external writes forbid blind rollback after commitment starts`() {
+    @Test fun `owned site selection precedes public writes and metadata follows committed outbound`(): Unit = temporary { path ->
+        val fake = Fake(); val tx = ReleaseTransaction(path, fake)
+        val accepted = owned(path, fake)
+        val committed = tx.activate("tx-two", hash, accepted.hash, fake.authorization(path))
+        assertEquals(Phase.COMMITTED, committed.phase)
+        assertTrue(fake.calls.indexOf("consume-permit") < fake.calls.indexOf("select-site"))
+        assertTrue(fake.calls.indexOf("select-site") < fake.calls.indexOf("open-writes"))
+        assertTrue(fake.calls.indexOf("open-writes") < fake.calls.indexOf("release-outbound"))
+        assertEquals(listOf("release-outbound", "finalize-site", "retire-old"), fake.calls.takeLast(3))
+    }
+    @Test fun `lost global site finalization after COMMITTED never restores stale original state`(): Unit = temporary { path ->
+        val fake = Fake("finalize-site"); val tx = ReleaseTransaction(path, fake)
+        val accepted = owned(path, fake)
+        assertFailsWith<IllegalStateException> { tx.activate("tx-two", hash, accepted.hash, fake.authorization(path)) }
+        assertEquals(Phase.COMMITTED, TransactionJournal.verify(path).last().phase)
+        assertTrue("release-outbound" in fake.calls)
+        assertFalse("restore-old" in fake.calls || "reload-old-caddy" in fake.calls || "retire-old" in fake.calls)
+    }
+    @Test fun `owned activation refuses callback-only authority before consuming permit`(): Unit = temporary { path ->
+        val fake = Fake(); val tx = ReleaseTransaction(path, fake)
+        val accepted = owned(path, fake)
+        val callbackOnly = object : ReleaseActivationAuthorization {
+            override fun verify(binding: ReleaseActivationBinding) = "f".repeat(64)
+            override fun consume(binding: ReleaseActivationBinding, permitSha256: String, activationJournalHead: String) = Unit
+        }
+        assertFailsWith<IllegalStateException> { tx.activate("tx-two", hash, accepted.hash, callbackOnly) }
+        assertEquals(Phase.ACCEPTED, TransactionJournal.verify(path).last().phase)
+        assertFalse("open-writes" in fake.calls || "release-outbound" in fake.calls)
+    }
+    @Test fun `possible external writes forbid blind rollback after commitment starts`(): Unit {
         for (step in listOf("open-writes", "release-outbound")) temporary { path ->
             val fake = Fake(step)
             val tx = ReleaseTransaction(path, fake)
-            val ready = tx.execute("tx-two", hash, "old-release", deployment)
+            val ready = tx.execute("tx-two", hash, update.sourceGeneration, update = update)
             val error = assertFailsWith<IllegalStateException> {
                 tx.activate("tx-two", hash, ready.hash, fake.authorization(path))
             }
@@ -143,26 +217,25 @@ class ReleaseTransactionTest {
             assertEquals(Phase.RECOVERY_REQUIRED, TransactionJournal.verify(path).last().phase)
         }
     }
-    @Test fun `a corrected candidate can qualify in a fresh transaction without rewriting the failure`() = temporary { path ->
+    @Test fun `a corrected candidate can qualify in a fresh transaction without rewriting the failure`(): Unit = temporary { path ->
         val failed = Fake("readiness")
         val failure = assertFailsWith<IllegalStateException> {
-            ReleaseTransaction(path, failed).execute("failed-trial", hash, "old-release")
+            owned(path, failed, "failed-trial")
         }
         assertTrue(failure.message.orEmpty().contains("diagnose, correct and qualify a fresh attempt"))
         assertTrue("verify-old" in failed.calls) // Injected recovery observation, not a live restore claim.
         val original = Files.readAllBytes(path)
         val replay = Fake()
-        assertFailsWith<IllegalArgumentException> { ReleaseTransaction(path, replay).execute("retry", hash, "old-release") }
+        assertFailsWith<IllegalArgumentException> { owned(path, replay, "retry") }
         assertTrue(replay.calls.isEmpty())
         val repaired = Fake()
-        val result = ReleaseTransaction(path.resolveSibling("corrected.journal"), repaired)
-            .execute("corrected-trial", "b".repeat(64), "old-release")
+        val result = owned(path.resolveSibling("corrected.journal"), repaired, "corrected-trial", "b".repeat(64))
         assertEquals(Phase.ACCEPTED, result.phase)
         assertTrue(original.contentEquals(Files.readAllBytes(path)))
         assertEquals(Phase.RECOVERY_REQUIRED, TransactionJournal.verify(path).last().phase)
     }
 
-    @Test fun `activation needs exact deployment authority and durable single use before writes`() = temporary { path ->
+    @Test fun `activation needs exact deployment authority and durable single use before writes`(): Unit = temporary { path ->
         val fake = Fake(); val tx = ReleaseTransaction(path, fake)
         val ready = tx.execute("tx", hash, null, deployment)
         assertEquals(deployment, ready.deployment)
@@ -174,12 +247,13 @@ class ReleaseTransactionTest {
         assertFalse("verify-permit" in fake.calls)
         val committed = tx.activate("tx", hash, ready.hash, fake.authorization(path))
         assertEquals(Phase.COMMITTED, committed.phase)
-        assertEquals(listOf("verify-permit", "consume-permit", "open-writes", "release-outbound"), fake.calls.takeLast(4))
+        assertEquals(listOf("verify-permit", "consume-permit", "select-site", "open-writes", "release-outbound",
+            "finalize-site", "retire-install-site"), fake.calls.takeLast(7))
         assertEquals("f".repeat(64), committed.activationPermitSha256)
         assertFailsWith<IllegalArgumentException> { tx.activate("tx", hash, committed.hash, fake.authorization(path)) }
     }
 
-    @Test fun `failed or interrupted permit consumption leaves writes closed and forbids replay`() {
+    @Test fun `failed or interrupted permit consumption leaves writes closed and forbids replay`(): Unit {
         for (failure in listOf("verify-permit", "consume-permit", "interrupt-consume-permit", "interrupt-verify-permit")) temporary { path ->
             val fake = Fake(); val tx = ReleaseTransaction(path, fake)
             val ready = tx.execute("tx", hash, null, deployment)
@@ -196,7 +270,7 @@ class ReleaseTransactionTest {
         }
     }
 
-    @Test fun `activation compare and append rejects races and retains incomplete claims`() = temporary { path ->
+    @Test fun `activation compare and append rejects races and retains incomplete claims`(): Unit = temporary { path ->
         val fake = Fake(); val tx = ReleaseTransaction(path, fake)
         val ready = tx.execute("tx", hash, null, deployment)
         assertFailsWith<IllegalArgumentException> { TransactionJournal.appendExisting(path, Phase.ACTIVATION_STARTED,
@@ -210,30 +284,30 @@ class ReleaseTransactionTest {
         assertFalse("open-writes" in fake.calls)
     }
 
-    @Test fun `isolation or ingress rollback failure forbids source restoration`() {
+    @Test fun `isolation or ingress rollback failure forbids source restoration`(): Unit {
         for (recovery in listOf("isolate", "reload-old-caddy")) temporary { path ->
             val fake = Fake("domain-journeys").also { it.failAlso = recovery }
-            assertFailsWith<IllegalStateException> { ReleaseTransaction(path, fake).execute("tx", hash, "old-release") }
+            assertFailsWith<IllegalStateException> { owned(path, fake, "tx") }
             assertFalse("restore-old" in fake.calls || "verify-old" in fake.calls)
             assertEquals(Phase.RECOVERY_REQUIRED, TransactionJournal.verify(path).last().phase)
         }
     }
 
-    @Test fun `failed source restore cannot be reported verified`() = temporary { path ->
+    @Test fun `failed source restore cannot be reported verified`(): Unit = temporary { path ->
         val fake = Fake("stage").also { it.failAlso = "restore-old" }
-        assertFailsWith<IllegalStateException> { ReleaseTransaction(path, fake).execute("tx", hash, "old-release") }
+        assertFailsWith<IllegalStateException> { owned(path, fake, "tx") }
         assertTrue("restore-old" in fake.calls)
         assertFalse("verify-old" in fake.calls)
     }
 
-    @Test fun `invalid deployment fails before preflight or journal creation`() = temporary { path ->
+    @Test fun `invalid deployment fails before preflight or journal creation`(): Unit = temporary { path ->
         val fake = Fake()
         assertFailsWith<IllegalArgumentException> { ReleaseTransaction(path, fake).execute("tx", hash, null,
             deployment.copy(generationId = "foreign")) }
         assertTrue(fake.calls.isEmpty()); assertFalse(Files.exists(path))
     }
 
-    @Test fun `crash at every journal phase requires recovery instead of guessing`() {
+    @Test fun `crash at every journal phase requires recovery instead of guessing`(): Unit {
         for (phase in listOf(Phase.PREPARED, Phase.FROZEN, Phase.SNAPSHOT_VERIFIED, Phase.STAGED,
             Phase.CUTOVER_RESTRICTED, Phase.ACCEPTED, Phase.COMMITTED, Phase.RECOVERY_REQUIRED)) temporary { path ->
             TransactionJournal.append(path, "tx-two", hash, Phase.PREPARED, "old-release", null)
@@ -248,7 +322,7 @@ class ReleaseTransactionTest {
             }
             if (phase == Phase.RECOVERY_REQUIRED) TransactionJournal.appendExisting(path, phase, snapshot)
             val fake = Fake()
-            assertFailsWith<IllegalArgumentException> { ReleaseTransaction(path, fake).execute("tx-two", hash, "old-release") }
+            assertFailsWith<IllegalArgumentException> { owned(path, fake) }
             assertTrue(fake.calls.isEmpty())
             assertEquals(phase, TransactionJournal.verify(path).last().phase)
         }

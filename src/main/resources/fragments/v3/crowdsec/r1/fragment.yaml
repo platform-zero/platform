@@ -1,0 +1,94 @@
+schemaVersion: 2
+id: private-crowdsec
+revision: 1
+product: crowdsec
+artifacts: [crowdsec]
+providers: [caddy]
+networks: [guard-data]
+providerNetworks:
+  caddy: [guard-data]
+volumes:
+  - {id: crowdsec-data, userId: 1000}
+  - {id: crowdsec-config, userId: 1000}
+  - {id: crowdsec-logs, userId: 1000}
+  - {id: crowdsec-bootstrap, userId: 1000}
+inputs:
+  - {name: crowdsec-crowdsec.env, owner: crowdsec, purpose: RUNTIME, consumers: [crowdsec-guard-init, guard]}
+  - {name: crowdsec-crowdsec.yaml, owner: crowdsec, purpose: RUNTIME, consumers: [crowdsec-guard-init, guard]}
+  - {name: crowdsec-profiles.yaml, owner: crowdsec, purpose: RUNTIME, consumers: [crowdsec-guard-init, guard]}
+  - {name: crowdsec-acquis.yaml, owner: crowdsec, purpose: RUNTIME, consumers: [crowdsec-guard-init, guard]}
+  - {name: crowdsec-ca.pem, owner: crowdsec, purpose: RUNTIME, consumers: [crowdsec-guard-init, guard]}
+  - {name: crowdsec-web.pem, owner: crowdsec, purpose: RUNTIME, consumers: [crowdsec-guard-init, guard]}
+  - {name: crowdsec-web-key.pem, owner: crowdsec, purpose: RUNTIME, consumers: [crowdsec-guard-init, guard]}
+  - {name: crowdsec-parser.yaml, owner: crowdsec, purpose: BOOTSTRAP, consumers: [crowdsec-guard-init]}
+  - {name: crowdsec-scenario.yaml, owner: crowdsec, purpose: BOOTSTRAP, consumers: [crowdsec-guard-init]}
+processes:
+  - id: crowdsec-guard-init
+    artifact: crowdsec
+    userId: 1000
+    oneShot: true
+    memoryMiB: 512
+    networks: [guard-data]
+    environmentFile: crowdsec-crowdsec.env
+    entrypoint: /bin/sh
+    volumes:
+      - {volume: crowdsec-data, target: /data}
+      - {volume: crowdsec-config, target: /configuration}
+      - {volume: crowdsec-logs, target: /synthetic-logs}
+      - {volume: crowdsec-bootstrap, target: /bootstrap}
+    files:
+      - {file: crowdsec-crowdsec.yaml, target: /run/secrets/crowdsec.yaml}
+      - {file: crowdsec-profiles.yaml, target: /run/secrets/profiles.yaml}
+      - {file: crowdsec-acquis.yaml, target: /run/secrets/acquis.yaml}
+      - {file: crowdsec-ca.pem, target: /run/secrets/ca.pem}
+      - {file: crowdsec-web.pem, target: /run/secrets/web.pem}
+      - {file: crowdsec-web-key.pem, target: /run/secrets/web-key.pem}
+      - {file: crowdsec-parser.yaml, target: /run/secrets/parser.yaml}
+      - {file: crowdsec-scenario.yaml, target: /run/secrets/scenario.yaml}
+    command:
+      - -ec
+      - |
+        umask 077
+        test -z "$(ls -A /data)" && test -z "$(ls -A /configuration)" && test -z "$(ls -A /bootstrap)"
+        mkdir -p /configuration/parsers/s01-parse /configuration/scenarios /configuration/postoverflows /configuration/hub /configuration/collections
+        cp -R /staging/etc/crowdsec/patterns /configuration/patterns
+        cp /run/secrets/parser.yaml /configuration/parsers/s01-parse/private-http.yaml
+        cp /run/secrets/scenario.yaml /configuration/scenarios/private-http.yaml
+        printf '{}\n' > /configuration/hub/.index.json
+        printf 'simulation: false\n' > /configuration/simulation.yaml
+        touch /synthetic-logs/http.log
+        cscli -c /run/secrets/crowdsec.yaml machines add private-fixture --auto --url https://guard:8443/ --file /data/local-api.yaml > /bootstrap/enrollment.log
+        printf 'ca_cert_path: /run/secrets/ca.pem\n' >> /data/local-api.yaml
+        cscli -c /run/secrets/crowdsec.yaml bouncers add private-probe -o raw > /bootstrap/bouncer-key
+        test -s /bootstrap/bouncer-key
+        chmod 600 /data/local-api.yaml /bootstrap/bouncer-key
+        sync
+  - id: guard
+    artifact: crowdsec
+    userId: 1000
+    memoryMiB: 512
+    networks: [guard-data]
+    environmentFile: crowdsec-crowdsec.env
+    entrypoint: /usr/local/bin/crowdsec
+    command: [-c, /run/secrets/crowdsec.yaml]
+    volumes:
+      - {volume: crowdsec-data, target: /data}
+      - {volume: crowdsec-config, target: /configuration}
+      - {volume: crowdsec-logs, target: /synthetic-logs}
+    files:
+      - {file: crowdsec-crowdsec.yaml, target: /run/secrets/crowdsec.yaml}
+      - {file: crowdsec-profiles.yaml, target: /run/secrets/profiles.yaml}
+      - {file: crowdsec-acquis.yaml, target: /run/secrets/acquis.yaml}
+      - {file: crowdsec-ca.pem, target: /run/secrets/ca.pem}
+      - {file: crowdsec-web.pem, target: /run/secrets/web.pem}
+      - {file: crowdsec-web-key.pem, target: /run/secrets/web-key.pem}
+    readiness: [/usr/local/bin/cscli, -c, /run/secrets/crowdsec.yaml, lapi, status]
+install:
+  processes: [crowdsec-guard-init, guard]
+  dependencies:
+    crowdsec-guard-init: []
+    guard: [crowdsec-guard-init, caddy]
+restore:
+  processes: [guard]
+  dependencies:
+    guard: [caddy]

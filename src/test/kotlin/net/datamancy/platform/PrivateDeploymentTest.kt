@@ -25,6 +25,22 @@ class PrivateDeploymentTest {
         try { block(base, spec(), Fake(image, imageId)) }
         finally { Files.walk(base).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
     }
+    @Test fun `cold V2 retains declared unmounted state without changing legacy bytes or daemon mounts`() {
+        val original = spec()
+        assertFalse("unmountedRecoveryVolumes" in Json { encodeDefaults = true }.encodeToString(original))
+        val cold = original.copy(store = RuntimeStore.CANONICAL_V2,
+            volumes = original.volumes + RuntimeVolume("bootstrap", 999),
+            processes = original.processes.filterNot { it.oneShot }.map { it.copy(dependencies = emptyList()) },
+            unmountedRecoveryVolumes = setOf("bootstrap"))
+        assertEquals(listOf("app"), PrivateDeployment.validate(cold).map { it.id })
+        assertEquals(original.processes.last().volumes, cold.processes.single().volumes)
+        assertTrue("unmountedRecoveryVolumes" in Json.encodeToString(cold))
+        assertFails { PrivateDeployment.validate(cold.copy(store = RuntimeStore.LEGACY)) }
+        assertFails { PrivateDeployment.validate(cold.copy(processes = original.processes)) }
+        assertFails { PrivateDeployment.validate(cold.copy(unmountedRecoveryVolumes = emptySet())) }
+        assertFails { PrivateDeployment.validate(cold.copy(unmountedRecoveryVolumes = setOf("data", "bootstrap"))) }
+        assertFails { PrivateDeployment.validate(cold.copy(unmountedRecoveryVolumes = setOf("foreign"))) }
+    }
     @Test fun `explicit store dispatch is scoped and cannot adopt legacy ownership`() = fixture { base, old, fake ->
         val selected = old.copy(store = RuntimeStore.CANONICAL_V2)
         val runtime = PrivateDeployment(base, fake) {}
@@ -37,6 +53,24 @@ class PrivateDeploymentTest {
         assertFails { runtime.apply(old) }
         assertEquals(RuntimeStore.LEGACY, old.store)
     }
+    @Test fun `TURN native ingress cannot be smuggled into private staging or an unrelated host`(): Unit {
+        val fixed = RuntimeNativeIngressPublication(site = "unit", listenAddress = "10.80.0.1")
+        assertFails { PrivateDeployment.validate(spec().copy(nativeIngress = fixed)) }
+        assertFails { PrivateDeployment.validate(spec().copy(nativeIngress = fixed.copy(approvedHost = "other.datamancy.net"))) }
+    }
+    @Test fun `owned migration database cannot start without actual imported volumes and retained fence`(): Unit =
+        fixture { base, old, fake ->
+            val db = RuntimeProcess("postgres", image, imageId, 999,
+                volumes = listOf(RuntimeMount("data", "/data")), readiness = listOf("check"))
+            val app = RuntimeProcess("planka", image, imageId, 999, dependencies = listOf("postgres"),
+                environmentFile = "app.env", files = listOf(RuntimeFile("service.conf", "/etc/service.conf")),
+                volumes = listOf(RuntimeMount("data", "/data")), readiness = listOf("check"))
+            val owned = old.copy(processes = listOf(db, app))
+            val native = PrivateDeployment(base, fake) {}
+            assertFails { native.startImportedMigrationDatabase(owned, "11111111-1111-1111-1111-111111111111") }
+            assertFails { native.startImportedOwned(owned, "11111111-1111-1111-1111-111111111111") }
+            assertTrue(fake.resources.isEmpty(), "No unimported Planka state or writer may be created")
+        }
     private class Fake(private val image: String, private val imageId: String) : RuntimeCommands {
         val calls = mutableListOf<List<String>>()
         val resources = mutableMapOf<Pair<String, String>, JsonObject>()
@@ -296,7 +330,7 @@ class PrivateDeploymentTest {
         val declaredHash = RecoveryCapsule.fileHash(archive)
         assertFails { runtime.importCold(spec, mapOf("data" to archive), "a".repeat(64), verify, mapOf("data" to "0".repeat(64))) }
         assertFalse(Files.exists(base.resolve("${spec.name}/runtime.import.intent")))
-        val fence = runtime.importCold(spec, mapOf("data" to archive), "a".repeat(64), verify, mapOf("data" to declaredHash), restoreRoot = { _, _, _ -> }) { _, _, output -> Files.copy(archive, output); Unit }
+        val fence = runtime.importCold(spec, mapOf("data" to archive), "a".repeat(64), verify, mapOf("data" to declaredHash), restoreMetadata = { _, _, _ -> }) { _, _, output -> Files.copy(archive, output); Unit }
         assertTrue(fake.calls.none { it.first() in setOf("start", "create", "wait") })
         assertTrue(Files.exists(base.resolve("${spec.name}/runtime.import.complete")))
         assertFalse(Files.exists(base.resolve("${spec.name}/runtime.jobs")))
@@ -322,7 +356,7 @@ class PrivateDeploymentTest {
         val verify = Files.createDirectory(base.resolve("verify"), PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
         val runtime = PrivateDeployment(base, fake) {}
         val declaredHash = RecoveryCapsule.fileHash(archive)
-        assertFails { runtime.importCold(spec, mapOf("data" to archive), "a".repeat(64), verify, mapOf("data" to declaredHash), restoreRoot = { _, _, _ -> }) { _, _, _ -> error("injected readback failure") } }
+        assertFails { runtime.importCold(spec, mapOf("data" to archive), "a".repeat(64), verify, mapOf("data" to declaredHash), restoreMetadata = { _, _, _ -> }) { _, _, _ -> error("injected readback failure") } }
         val fence = assertNotNull(runtime.maintenanceStatus(spec))
         assertFails { runtime.leaveMaintenance(spec, fence.id) }
         assertFails { runtime.startImported(spec, fence.id) }
@@ -342,7 +376,7 @@ class PrivateDeploymentTest {
                 if (interrupt) throw InterruptedException("synthetic interrupted readiness") else error("synthetic readiness failure")
             }
             val fence = runtime.importCold(spec, mapOf("data" to archive), "a".repeat(64), verify,
-                mapOf("data" to RecoveryCapsule.fileHash(archive)), restoreRoot = { _, _, _ -> }) { _, _, output -> Files.copy(archive, output); Unit }
+                mapOf("data" to RecoveryCapsule.fileHash(archive)), restoreMetadata = { _, _, _ -> }) { _, _, output -> Files.copy(archive, output); Unit }
             fake.failReady = true
             try {
                 assertFails { runtime.startImported(spec, fence.id) }

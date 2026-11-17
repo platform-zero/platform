@@ -30,6 +30,17 @@ internal object NodeMetricsRuntime {
                 readinessHttpPort = 9090, readinessHttpPath = "/-/ready")
         )).also { PrivateDeployment.validate(it) }
     }
+    /** Canonical six-product composition owns ONE exporter and ONE metrics textfile volume.
+     * The historical standalone spec above is retained byte-for-byte for old generations;
+     * its second Prometheus is never added to the canonical graph. */
+    fun canonicalExporter(inventory: AcquiredInventory): Pair<RuntimeVolume, List<RuntimeProcess>> {
+        val legacy = spec(inventory)
+        val volume = legacy.volumes.single { it.id == "metrics" }
+        val processes = legacy.processes.filter { it.id in setOf("metrics-init", "node") }
+        require(processes.map { it.id } == listOf("metrics-init", "node") &&
+            processes.all { process -> process.volumes.all { it.volume == volume.id } })
+        return volume to processes
+    }
     fun prepare(inventory: AcquiredInventory, base: Path = PrivateDeployment.BASE, name: String = "node-metrics", store: RuntimeStore = RuntimeStore.LEGACY): Path =
         RuntimePreparation.prepare(spec(inventory, name).copy(store = store), base) { inputs(PrivateSearchPki.generate("node")) }
     fun inputs(certificates: Map<String, String>): Map<String, String> {

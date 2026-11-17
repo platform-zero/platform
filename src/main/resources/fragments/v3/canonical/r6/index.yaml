@@ -1,0 +1,42 @@
+schemaVersion: 2
+provenanceSha256: b12ef0f90f9e4b8262f28058151def6c44c7f3f6597583787de3688bd66bc5cd
+manifestResource: canonical/r6/manifest.yaml
+manifestSha256: 08bbd8fb06880329deb6fc60de1876d621b049abe177eb65262cf640bd7f5355
+lastManifestSha256: 01a16971a26a2b30e2e8c395029ef46bee1081c4380c32ad323b4ce9171199a8
+latestPriorManifestSha256: fad72915041487cd34c1dcf650d8f924f873a196d3f02305222c15423ae3b0cb
+priorManifestSha256: 22c4dc7d401c6bcb0053125872f472691cefe13147b7b8902833f796b27a65a1
+intermediateManifestSha256: 4289beb343bd5895691523d4cc347e61baf74af32b78b7a495a86846af881133
+previousManifestSha256: b67e948e6cf68398a61d3d284de7ee1abeeaf8b57897afa6b057949e7e84a53c
+entries:
+  - id: shared-valkey
+    revision: 1
+    resource: valkey/r1/fragment.yaml
+    sha256: 2c3534ab9256e2f8a7752851e62a5b07ee6725f63fd2476b694fc35f22b3451d
+  - id: shared-ntfy
+    revision: 1
+    resource: ntfy/r1/fragment.yaml
+    sha256: 9d036f99c9be4228eef7b7e42b7f6a2d206c5b8056e8c4d43ff517985e171393
+  - id: planka-postgres
+    revision: 1
+    resource: planka/r1/fragment.yaml
+    sha256: 2a9d63897e071aff1e841e5afcd5bbeaf6d9c9fe55710ec87ddb785de516b560
+  - id: shared-mariadb
+    revision: 1
+    resource: mariadb/r1/fragment.yaml
+    sha256: 683b704ecb7488e9771e7ecac14803dcd7b3503fb42805e60940c28428ba6da1
+  - id: shared-memcached
+    revision: 1
+    resource: memcached/r1/fragment.yaml
+    sha256: 927f52a85ead969ad3812437601ceea9bf3c0f4a93a3b0e2ab01c80573e57ebe
+  - id: identity-keycloak
+    revision: 1
+    resource: keycloak/r1/fragment.yaml
+    sha256: 9eb13f0a60c5732371687e8ebc26a68ed521cdf25e0f728467264a1b9cfe89f6
+  - id: identity-keycloak
+    revision: 2
+    resource: keycloak/r2/fragment.yaml
+    sha256: 33e62501b015c58f96edf785214b14631f7569508c658bd31acabbc0e96717af
+  - id: identity-keycloak
+    revision: 3
+    resource: keycloak/r3/fragment.yaml
+    sha256: 238a41dca23ffa24a8d2f625b4f8e7f5c4b8d88ee80a747ba113af92cb729a25

@@ -8,8 +8,12 @@ import kotlinx.serialization.json.Json
 import kotlin.test.*
 
 class ReleaseDispatchTest {
-    @Test fun `install dispatch drives native control boundaries then explicit single use activation`() = ReleaseControlTestFixture().use { f ->
+    @Test fun `install dispatch drives native control boundaries then explicit single use activation`(): Unit = ReleaseControlTestFixture().use { f ->
         val dispatcher = f.dispatcher()
+        val originalWire = Json { encodeDefaults = true }.encodeToString(f.request)
+        assertFalse(originalWire.contains("updatePreparation"))
+        assertTrue(originalWire.contains("\"deployment\""))
+        assertTrue(originalWire.contains("\"publication\""))
         val accepted = Json.decodeFromString<JournalRecord>(dispatcher.execute(ReleaseRequest.Install(f.request)))
         assertEquals(Phase.ACCEPTED, accepted.phase)
         assertEquals(f.capture, accepted.snapshotId); assertEquals(f.qualifiedCapture, accepted.qualificationSnapshotId)
@@ -27,7 +31,15 @@ class ReleaseDispatchTest {
         assertEquals("activate", ReleaseDispatch.operation(activation))
     }
 
-    @Test fun `backup and restoration dispatch preserve failures target identity and interruption`() {
+    @Test fun `RESTORE refuses absent original-host bridge before import or UI effect`(): Unit =
+        ReleaseControlTestFixture().use { f ->
+            val withoutBridge = f.dispatcher(bridge = false)
+            val restore = ReleaseRequest.RestoreTest(ReleaseGeneration(f.source, f.sourceHash),
+                f.inventoryPin, f.capture, f.stagedTarget, f.request.restore)
+            assertFails { withoutBridge.execute(restore) }
+            assertFalse(f.calls.any { it.startsWith("import:") || it.startsWith("acceptance:execute-qualified") })
+        }
+    @Test fun `backup and restoration dispatch preserve failures target identity and interruption`(): Unit {
         ReleaseControlTestFixture().use { f ->
             val dispatcher = f.dispatcher(); val generation = ReleaseGeneration(f.source, f.sourceHash)
             val backup = ReleaseRequest.Backup(generation, f.inventoryPin, f.capture)
@@ -35,7 +47,8 @@ class ReleaseDispatchTest {
             f.failure = "backup"; assertFails { dispatcher.execute(backup) }; f.failure = null
             assertFails { dispatcher.execute(backup.copy(inventory = f.inventoryPin.copy(sha256 = "0".repeat(64)))) }
             val restore = ReleaseRequest.RestoreTest(generation, f.inventoryPin, f.capture, f.stagedTarget, f.request.restore)
-            assertEquals("unit-only semantic runner response", dispatcher.execute(restore))
+            assertTrue(dispatcher.execute(restore).matches(Regex("[a-f0-9]{64}")),
+                "RESTORE returns immutable removed-bridge/source-resume evidence, not a runner callback")
             assertTrue("isolate:${f.stagedTarget}" in f.calls)
             assertFails { dispatcher.execute(restore.copy(target = f.source)) }
             assertFails { dispatcher.execute(restore.copy(acceptance = f.request.staged)) }
@@ -51,44 +64,37 @@ class ReleaseDispatchTest {
         }
     }
 
-    private class RecordingControl(private val calls: MutableList<String>) : ReleaseGenerationControl {
-        override fun preflight() { calls += "preflight" }
-        override fun stage() { calls += "stage" }
-        override fun readiness() { calls += "ready" }
-        override fun freeze() { calls += "freeze" }
-        override fun verifyQuiesced() { calls += "quiesce" }
-        override fun capture(): String { calls += "capture"; return "cap-111111111111" }
-        override fun restoreTest(snapshot: String) { calls += "restore-test" }
-        override fun migrate() { calls += "migrate" }
-        override fun resumeRestrictedCandidate() { calls += "resume" }
-        override fun isolateCandidate() { calls += "isolate" }
-        override fun restorePrevious(snapshot: String) { calls += "restore-old:$snapshot" }
-        override fun verifyPrevious() { calls += "verify-old" }
-        override fun qualificationSnapshot() = "cap-222222222222"
-    }
-    @Test fun `typed update dispatch and separately invoked rollback retain durable caddy result and terminal claim`() = ReleaseControlTestFixture().use { f ->
-        // Unit routing contract, NOT native owned-update creation or promotion evidence.
-        val calls = mutableListOf<String>()
-        val dispatcher = f.dispatcher { _, _ -> RecordingControl(calls) }
-        val app = f.bundle.members.single().spec.processes.single { it.id == "planka" }
-        val migration = PlankaMigrationRequest(operation = "r-555555555555", transition = PlankaVersionTransition("2.2.0", "2.2.1"),
-            generation = f.source, bundleSha256 = f.sourceHash, snapshotId = f.capture, manifest = f.inventoryPin,
-            migrationEnvironment = f.inventoryPin, image = ActivationImagePin(app.image, app.imageId), fenceId = f.fence)
-        val request = f.request.copy(previous = ReleaseGeneration("q-444444444444", "4".repeat(64)),
-            previousPublication = ReleasePublication(f.root.resolve("old-publication").toString(), "5".repeat(64)), migration = migration)
-        assertFails { dispatcher.execute(ReleaseRequest.Install(request)) }
+    @Test fun `owned update refuses caller future deployment migration and missing original source pins`() : Unit = ReleaseControlTestFixture().use { f ->
+        val dispatcher = f.dispatcher(controls = { _, _ -> error("Invalid update must not construct native controls") })
+        val source = ReleaseGeneration(f.source, f.sourceHash)
+        val intent = ReleaseUpdateIntent(source, f.stagedTarget, "c".repeat(64), f.inventoryPin.sha256,
+            f.inventoryPin.sha256, f.inventoryPin.sha256, PlankaVersionTransition("2.2.0", "2.2.1"))
+        val original = ActivationInput(f.sourceRoot.resolve("bundle.json").toString(), f.sourceHash)
+        val preparation = ReleaseUpdatePreparation(intent = intent, previousInventory = f.inventoryPin,
+            candidateInventory = f.inventoryPin, sourceBundle = original, sitePolicy = f.inventoryPin,
+            migrationOperation = "r-555555555555")
+        val request = f.request.copy(previous = source, previousPublication =
+            ReleasePublication(f.root.resolve("old-publication").toString(), "5".repeat(64)),
+            deployment = null, publication = null, migration = null, updatePreparation = preparation)
+        val preparedWire = Json { encodeDefaults = true }.encodeToString(request)
+        assertFalse(preparedWire.contains("\"deployment\""))
+        assertFalse(preparedWire.contains("\"publication\""))
+        assertTrue(preparedWire.contains("\"updatePreparation\""))
         assertFails { dispatcher.execute(ReleaseRequest.Update(f.request)) }
-        assertFails { dispatcher.execute(ReleaseRequest.Update(request.copy(migration = migration.copy(transition = PlankaVersionTransition("2.2.1", "2.2.0"))))) }
-        val accepted = Json.decodeFromString<JournalRecord>(dispatcher.execute(ReleaseRequest.Update(request)))
-        assertTrue(calls.indexOf("migrate") < calls.indexOf("ready"))
-        val rollback = ReleaseRequest.Rollback(request, accepted.hash)
-        val recovered = Json.decodeFromString<JournalRecord>(dispatcher.execute(rollback))
-        assertEquals(Phase.RECOVERY_REQUIRED, recovered.phase)
-        assertTrue(calls.indexOf("isolate") < calls.indexOf("restore-old:${f.capture}"))
-        assertEquals("verify-old", calls.last())
-        assertFails { dispatcher.execute(rollback) }
+        assertFails { dispatcher.execute(ReleaseRequest.Install(request)) }
+        assertFails { dispatcher.execute(ReleaseRequest.Update(request.copy(deployment = f.request.deployment))) }
+        assertFails { dispatcher.execute(ReleaseRequest.Update(request.copy(publication = f.request.publication))) }
+        assertFails { dispatcher.execute(ReleaseRequest.Update(request.copy(updatePreparation = null))) }
+        assertFails { dispatcher.execute(ReleaseRequest.Update(request.copy(migration = f.request.migration ?: PlankaMigrationRequest(
+            operation = "r-555555555555", transition = intent.transition, generation = f.stagedTarget,
+            bundleSha256 = "a".repeat(64), snapshotId = f.capture, manifest = f.inventoryPin,
+            migrationEnvironment = f.inventoryPin, image = ActivationImagePin("pinned", "b".repeat(64)), fenceId = f.fence)))) }
+        assertFails { dispatcher.execute(ReleaseRequest.Update(request.copy(updatePreparation = preparation.copy(
+            sourceBundle = original.copy(sha256 = "0".repeat(64)))))) }
+        assertFails { dispatcher.execute(ReleaseRequest.Update(request.copy(updatePreparation = preparation.copy(
+            migrationOperation = "bad")))) }
+        assertTrue(f.calls.none { it == "stage" || it.startsWith("hold:") })
         assertEquals("update", ReleaseDispatch.operation(ReleaseRequest.Update(request)))
-        assertEquals("rollback", ReleaseDispatch.operation(rollback))
     }
 
     @Test fun `reconcile observes lost caddy acknowledgement without resending or opening writes`(): Unit = ReleaseControlTestFixture().use { f ->
@@ -111,8 +117,8 @@ class ReleaseDispatchTest {
         assertFails { dispatcher.execute(ReleaseRequest.Rollback(f.request, head.hash)) }
     }
 
-    @Test fun `invalid transaction definitions fail before effect construction`() = ReleaseControlTestFixture().use { f ->
-        val dispatcher = f.dispatcher { _, _ -> error("Must not construct native controls") }
+    @Test fun `invalid transaction definitions fail before effect construction`(): Unit = ReleaseControlTestFixture().use { f ->
+        val dispatcher = f.dispatcher(controls = { _, _ -> error("Must not construct native controls") })
         for (request in listOf(f.request.copy(schemaVersion = 9), f.request.copy(transactionId = "../foreign"),
             f.request.copy(snapshotId = "bad"), f.request.copy(restoreTarget = f.source),
             f.request.copy(previousPublication = ReleasePublication("/foreign", "a".repeat(64))))) {
@@ -134,7 +140,7 @@ class ReleaseDispatchTest {
         pin(root, "products.json", "{}"), pin(root, "manifest.json", "{}"), pin(root, "input.json", "{}"),
         pin(root, "journal.jsonl", "private unit journal\n").path, "b".repeat(64), root.resolve("artifacts").toString(),
         pin(root, "contexts.json", "{}"))
-    @Test fun `pinned acceptance command has fixed executable and exact independent input hashes`() = temporary { root ->
+    @Test fun `pinned acceptance command has fixed executable and exact independent input hashes`(): Unit = temporary { root ->
         val request = invocation(root); var verified = 0; val calls = mutableListOf<List<String>>()
         val acceptance = ReleaseAcceptance(root, AcceptanceControllerProcess { argv, directory ->
             assertEquals(root, directory); calls += argv; RuntimeCommandResult(0, "verified")
@@ -154,7 +160,7 @@ class ReleaseDispatchTest {
         assertFails { acceptance.run("execute-qualified", request) }
         assertEquals(4, calls.size)
     }
-    @Test fun `pinned verifier refusal and interruption propagate without fallback`() = temporary { root ->
+    @Test fun `pinned verifier refusal and interruption propagate without fallback`(): Unit = temporary { root ->
         val request = invocation(root)
         assertFails { ReleaseAcceptance(root, AcceptanceControllerProcess { _, _ -> RuntimeCommandResult(1, "no") }) { _, _ -> }
             .run("execute-qualified", request) }
@@ -166,7 +172,27 @@ class ReleaseDispatchTest {
         assertFails { ReleaseAcceptance(root, AcceptanceControllerProcess { _, _ -> error("must not execute") }) { _, _ -> error("changed distribution") }
             .run("execute-qualified", request) }
     }
-    @Test fun `strict typed wire selects backup and rejects unknown action or fields`() = temporary { root ->
+    @Test fun `controlled execution cannot fall back to legacy child on refusal`(): Unit = temporary { root ->
+        val invocation = invocation(root)
+        var legacy = 0
+        var controlled = 0
+        val acceptance = ReleaseAcceptance(root, AcceptanceControllerProcess { _, _ ->
+            legacy++; RuntimeCommandResult(0, "legacy")
+        }, controlledExecution = { operation, pinned, argv, directory ->
+            controlled++
+            assertEquals("execute-qualified", operation)
+            assertEquals(invocation, pinned)
+            assertEquals(root, directory)
+            assertEquals(invocation.input.path, argv[4])
+            RuntimeCommandResult(1, "retained refusal")
+        }, verifyDistribution = { _, _ -> })
+        assertFails { acceptance.run("execute-qualified", invocation) }
+        assertEquals(1, controlled)
+        assertEquals(0, legacy)
+        assertEquals("legacy", acceptance.run("finish-qualified", invocation.copy(artifacts = null, contexts = null)))
+        assertEquals(1, legacy)
+    }
+    @Test fun `strict typed wire selects backup and rejects unknown action or fields`(): Unit = temporary { root ->
         val inventory = pin(root, "inventory.json", "{}")
         val request: ReleaseRequest = ReleaseRequest.Backup(ReleaseGeneration("q-111111111111", "a".repeat(64)), inventory, "cap-111111111111")
         val json = Json { classDiscriminator = "operation" }
@@ -178,7 +204,7 @@ class ReleaseDispatchTest {
         assertFails { ReleaseGeneration("q-foreign", "a".repeat(64)).validate() }
         assertFails { ReleaseGeneration("q-111111111111", "bad").validate() }
     }
-    @Test fun `legacy qualification dispatch refuses invalid journal before launching controller`() = temporary { root ->
+    @Test fun `legacy qualification dispatch refuses invalid journal before launching controller`(): Unit = temporary { root ->
         val base = invocation(root).copy(artifacts = null, contexts = null)
         val assess = base.copy(expectedHead = "c".repeat(64))
         val calls = mutableListOf<List<String>>()

@@ -8,6 +8,8 @@ import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption.*
 import java.nio.file.attribute.PosixFilePermissions
+import java.time.Duration
+import java.time.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
@@ -20,6 +22,17 @@ import kotlinx.serialization.json.*
     val snapshot: KopiaSnapshotReceipt? = null, val failureType: String? = null)
 @Serializable internal data class KopiaRepositoryBinding(val generation: String, val image: String, val imageId: String,
     val custodySha256: String)
+@Serializable internal data class KopiaPendingTerminalReadback(val schemaVersion: Int = 1,
+    val generation: String, val bundleSha256: String, val operation: String, val kind: String,
+    val originalWorkerCid: String, val originalIntent: ActivationInput, val originalCreate: ActivationInput,
+    val originalPending: ActivationInput, val protectedReferenceBootstrap: ActivationInput,
+    val observationSha256: String, val snapshotObservation: KopiaPendingSnapshotReadback? = null,
+    val retentionObservation: KopiaRetentionReadback? = null, val originalAcknowledged: Boolean = false,
+    val disposition: String = "separate-native-terminal-observation-pending-fence-retained")
+@Serializable internal data class KopiaPendingSnapshotReadback(val generation: String, val capture: String,
+    val pendingSha256: String, val sourceManifestSha256: String,
+    val firstInventorySha256: String, val secondInventorySha256: String,
+    val observedSnapshotId: String?, val originalNativeResultSha256: String?, val disposition: String)
 
 internal interface GenerationSnapshotStore {
     fun snapshot(repository: Path, custody: Path, operation: Path, manifest: CapsuleManifest, payloads: Map<String, Path>): KopiaSnapshotReceipt
@@ -31,7 +44,7 @@ internal interface GenerationSnapshotStore {
  * A failed/unknown worker is retained with its intent; another operation cannot finish partial initialization.
  */
 internal class KopiaGenerationStore(private val image: AcquiredImage, private val commands: RuntimeCommands,
-    private val runtimeStore: RuntimeStore = RuntimeStore.LEGACY) : GenerationSnapshotStore {
+    private val runtimeStore: RuntimeStore = RuntimeStore.LEGACY, private val deadline: Instant? = null) : GenerationSnapshotStore {
     companion object {
         private val json = Json { encodeDefaults = true; ignoreUnknownKeys = false }
         private val mode = PosixFilePermissions.fromString("rw-------")
@@ -45,8 +58,14 @@ internal class KopiaGenerationStore(private val image: AcquiredImage, private va
                 receipt.plaintextBytes in 1..RecoveryCapsule.MAX_TOTAL && receipt.imageId.matches(Regex("[a-f0-9]{64}")) &&
                 receipt.image.matches(Regex("[a-z0-9./_-]+@sha256:[a-f0-9]{64}"))) { "Invalid Kopia snapshot binding" }
         }
-        fun real(inventory: AcquiredInventory, store: RuntimeStore = RuntimeStore.LEGACY) =
-            KopiaGenerationStore(inventory.images.single { it.product == "kopia" }, PrivateRootfulCommands(store = store), store)
+        fun real(inventory: AcquiredInventory, store: RuntimeStore = RuntimeStore.LEGACY,
+            deadline: Instant = Instant.now().plusSeconds(WeeklyRestoreSchedule.BUDGET_SECONDS)): KopiaGenerationStore {
+            val remaining = minOf(Duration.between(Instant.now(), deadline).seconds,
+                RecoveryDeadline.remainingSecondsIfBound() ?: Long.MAX_VALUE)
+            require(remaining in 1..WeeklyRestoreSchedule.BUDGET_SECONDS) { "Kopia operation deadline expired" }
+            return KopiaGenerationStore(inventory.images.single { it.product == "kopia" },
+                PrivateRootfulCommands(timeoutSeconds = remaining, store = store), store, deadline)
+        }
         private fun directory(path: Path) {
             require(path.isAbsolute && path.normalize() == path && path.toRealPath() == path && Files.isDirectory(path, NOFOLLOW_LINKS) &&
                 Files.getPosixFilePermissions(path) == dirMode &&
@@ -73,7 +92,13 @@ internal class KopiaGenerationStore(private val image: AcquiredImage, private va
     }
     private fun run(args: List<String>): RuntimeCommandResult {
         if (Thread.currentThread().isInterrupted) throw InterruptedException("Kopia operation interrupted before effect")
-        return try { commands.run(args) } catch (failure: InterruptedException) {
+        val native = deadline?.let {
+            val remaining = minOf(Duration.between(Instant.now(), it).seconds,
+                RecoveryDeadline.remainingSecondsIfBound() ?: Long.MAX_VALUE)
+            check(remaining in 1..WeeklyRestoreSchedule.BUDGET_SECONDS) { "Kopia deadline exhausted; retain intent" }
+            PrivateRootfulCommands(timeoutSeconds = remaining, store = runtimeStore)
+        } ?: commands
+        return try { native.run(args) } catch (failure: InterruptedException) {
             Thread.currentThread().interrupt(); throw failure
         }
     }
@@ -111,7 +136,13 @@ internal class KopiaGenerationStore(private val image: AcquiredImage, private va
         // Exclusive durable intent precedes container creation, not just snapshot submission.
         save(operation.resolve("$phase.intent.json"), json.encodeToString(mapOf("container" to name,
             "argvSha256" to ReleaseLocks.sha256(json.encodeToString(args).toByteArray()), "runtimeStore" to runtimeStore.name)).toByteArray())
-        call(args)
+        val created = call(args)
+        require(created.matches(Regex("[a-f0-9]{64}"))) {
+            "Original Kopia worker create ACK/CID missing; never start or infer it from a later census"
+        }
+        val intent = operation.resolve("$phase.intent.json")
+        save(operation.resolve("$phase.create.result.json"), json.encodeToString(KopiaOriginalWorkerCreate(
+            containerId = created, container = name, intentSha256 = ReleaseLocks.sha256(read(intent)))).toByteArray())
         val result = run(listOf("start", "--attach", name))
         save(operation.resolve("$phase.result.json"), json.encodeToString(mapOf("exitCode" to result.exitCode)).toByteArray())
         check(result.exitCode == 0) { "Kopia worker failed; no snapshot or initialization replay permitted" }
@@ -160,6 +191,9 @@ internal class KopiaGenerationStore(private val image: AcquiredImage, private va
         require(!operation.startsWith(repository) && !custody.startsWith(repository) && !repository.startsWith(operation))
         RecoverySegments.validate(manifest)
         RecoveryControllerPayloads.validate(manifest)
+        GenerationManagedComponents.validate(manifest)
+        RecoveryCredentialFiles.validate(manifest)
+        QuadletColdEvidence.validate(manifest)
         require(manifest.files == RecoveryCapsule.describe(payloads)) { "Snapshot source differs from declared payloads" }
         require(!Files.exists(repository.parent.resolve("snapshot.pending.json"), NOFOLLOW_LINKS)) { "Uncertain snapshot retained; reconcile, never resubmit with another ID" }
         preflight()
@@ -197,7 +231,7 @@ internal class KopiaGenerationStore(private val image: AcquiredImage, private va
         }
         save(parent.resolve("snapshot.pending.json"), json.encodeToString(mapOf("generation" to manifest.generation, "capture" to manifest.id)).toByteArray())
         val output = worker(repository, custody, operation, manifest.generation, manifest.id, "snapshot",
-            connect(false) + "\n$kopia snapshot create --json --fail-fast --force-hash=100 --parallel=1 --upload-limit-mb=8193 --no-send-snapshot-report --pin=${manifest.id} --override-source=p0v3@${manifest.generation}:/source /source",
+            connect(false) + "\n$kopia snapshot create --json --fail-fast --force-hash=100 --parallel=1 --no-send-snapshot-report --pin=${manifest.id} --override-source=p0v3@${manifest.generation}:/source /source",
             listOf("--volume=$source:/source:ro,nosuid,nodev,noexec"), writable = true)
         save(operation.resolve("snapshot.native.json"), output.toByteArray())
         val parsed = Json.parseToJsonElement(output)
@@ -293,6 +327,111 @@ internal class KopiaGenerationStore(private val image: AcquiredImage, private va
         }
     }
 
+    /** The core-held owner callback excludes every original writer and rechecks the
+     * original native create CID/intent before and after BOTH read-only Kopia censuses.
+     * Retains pending; only a separate terminal observation, never an original ACK. */
+    fun observePendingSnapshotTerminal(runtime: GenerationRuntime, repository: Path, custody: Path,
+        operation: Path, generation: String, bundleSha256: String, capture: String,
+        firstId: String, secondId: String): KopiaPendingTerminalReadback =
+        runtime.withKopiaTerminalReferenceExclusion(generation, bundleSha256, capture, "snapshot") { proof ->
+            require(proof.generation == generation && proof.bundleSha256 == bundleSha256)
+            val observation = observePendingSnapshot(repository, custody, operation, generation, capture, firstId, secondId)
+            require(observation.pendingSha256 == proof.pending.sha256 &&
+                observation.observedSnapshotId != null) { "Original Kopia snapshot is not complete in both native censuses" }
+            val terminal = KopiaPendingTerminalReadback(generation = generation, bundleSha256 = bundleSha256,
+                operation = capture, kind = "snapshot", originalWorkerCid = proof.originalWorkerCid,
+                originalIntent = proof.originalIntent, originalCreate = proof.originalCreate,
+                originalPending = proof.pending, protectedReferenceBootstrap = proof.referenceBootstrap,
+                observationSha256 = ReleaseLocks.sha256(json.encodeToString(observation).toByteArray()),
+                snapshotObservation = observation)
+            save(operation.resolve("snapshot.terminal-observation.json"), json.encodeToString(terminal).toByteArray())
+            terminal
+        }
+
+    fun observePendingRetentionTerminal(runtime: GenerationRuntime, repository: Path, custody: Path,
+        generation: String, bundleSha256: String, operationId: String,
+        firstId: String, secondId: String): KopiaPendingTerminalReadback =
+        runtime.withKopiaTerminalReferenceExclusion(generation, bundleSha256, operationId, "retention") { proof ->
+            require(proof.generation == generation && proof.bundleSha256 == bundleSha256)
+            val observation = observeRetentionReadback(repository, custody, generation, firstId, secondId)
+            require(observation.pendingSha256 == proof.pending.sha256 &&
+                observation.disposition in setOf("planned-deletions-observed", "no-deletion-required-observed")) {
+                "Original retention effect is not complete in both native censuses"
+            }
+            val terminal = KopiaPendingTerminalReadback(generation = generation, bundleSha256 = bundleSha256,
+                operation = operationId, kind = "retention", originalWorkerCid = proof.originalWorkerCid,
+                originalIntent = proof.originalIntent, originalCreate = proof.originalCreate,
+                originalPending = proof.pending, protectedReferenceBootstrap = proof.referenceBootstrap,
+                observationSha256 = ReleaseLocks.sha256(json.encodeToString(observation).toByteArray()),
+                retentionObservation = observation)
+            save(repository.parent.resolve("retention-$operationId/policy.terminal-observation.json"),
+                json.encodeToString(terminal).toByteArray())
+            terminal
+        }
+
+    /** Two fresh, bounded, independent native censuses for an uncertain original
+     * snapshot. An observed pin is not a lost original ACK or a restore pass.
+     * Only the controller can authorize separately named terminal disposition.
+     */
+    fun observePendingSnapshot(repository: Path, custody: Path, operation: Path,
+        generation: String, capture: String, firstId: String, secondId: String): KopiaPendingSnapshotReadback =
+        ReleasePrivateFiles.locked(repository.parent) {
+            require(generation.matches(Regex("q-[a-f0-9]{12}")) &&
+                capture.matches(Regex("cap-[a-f0-9]{12}")) && firstId != secondId &&
+                listOf(firstId,secondId).all { it.matches(Regex("r-[a-f0-9]{12}")) } &&
+                repository.parent.parent?.resolve("kopia-captures") == operation.parent &&
+                operation.fileName.toString() == capture)
+            val pendingBytes = read(repository.parent.resolve("snapshot.pending.json"))
+            val pending = json.decodeFromString<Map<String,String>>(pendingBytes.decodeToString())
+            require(pending == mapOf("generation" to generation, "capture" to capture))
+            val source = operation.resolve("payload/manifest.json")
+            val manifestBytes = read(source)
+            val manifest = json.decodeFromString<CapsuleManifest>(manifestBytes.decodeToString())
+            require(manifest.id == capture && manifest.generation == generation &&
+                manifest.files.size in 1..4096)
+            binding(repository,custody,generation); preflight()
+            fun census(id: String): Pair<ByteArray,Map<String,JsonObject>> {
+                val output = operation.resolve("snapshot-observe-$id"); mkdir(output)
+                val bytes = worker(repository,custody,output,generation,capture,"observe-$id",
+                    connect(true) + "\n$kopia snapshot list --all --json --retention --show-identical").toByteArray()
+                save(output.resolve("inventory.native.json"),bytes)
+                val values = json.parseToJsonElement(bytes.decodeToString()).jsonArray.map { it.jsonObject }
+                require(values.size <= 128 && values.map { it.getValue("id").jsonPrimitive.content }.distinct().size == values.size)
+                return bytes to values.associateBy { it.getValue("id").jsonPrimitive.content }
+            }
+            val first = census(firstId); val second = census(secondId)
+            require(first.second == second.second &&
+                read(repository.parent.resolve("snapshot.pending.json")).contentEquals(pendingBytes)) {
+                "Native snapshot census changed while original result was uncertain"
+            }
+            val matching = first.second.filterValues { native ->
+                native["pins"]?.jsonArray?.any { it.jsonPrimitive.content == capture } == true
+            }
+            require(matching.size <= 1) { "Ambiguous original snapshot pin" }
+            matching.values.forEach { nativeRoot(it,generation,manifest.files.size,
+                manifest.files.sumOf { file -> file.bytes }) }
+            val original = operation.resolve("snapshot.native.json")
+            val originalBytes = if (Files.exists(original,NOFOLLOW_LINKS)) read(original) else null
+            if (originalBytes != null) {
+                val parsed = json.parseToJsonElement(originalBytes.decodeToString())
+                val native = (if (parsed is JsonArray) parsed.single() else parsed).jsonObject
+                val id = native.getValue("id").jsonPrimitive.content
+                require(id in matching && nativeRoot(matching.getValue(id),generation,
+                    manifest.files.size,manifest.files.sumOf { it.bytes }) ==
+                    nativeRoot(native,generation,manifest.files.size,manifest.files.sumOf { it.bytes })) {
+                    "Original acknowledged snapshot differs from current native pin/root"
+                }
+            }
+            KopiaPendingSnapshotReadback(generation,capture,ReleaseLocks.sha256(pendingBytes),
+                ReleaseLocks.sha256(manifestBytes),ReleaseLocks.sha256(first.first),
+                ReleaseLocks.sha256(second.first),matching.keys.singleOrNull(),
+                originalBytes?.let { ReleaseLocks.sha256(it) },when {
+                    matching.isEmpty() -> "no-original-pin-observed; retain-fence"
+                    originalBytes == null -> "native-pin-observed-without-original-ack; separate-disposition-required"
+                    else -> "original-native-result-and-pin-observed; separate-disposition-required"
+                })
+        }
+
     /** Read-only reconciliation evidence. Never resends deletion or releases a pending-operation fence. */
     fun observeRetention(repository: Path, custody: Path, generation: String, observation: String): KopiaRetentionObservation =
         ReleasePrivateFiles.locked(repository.parent) {
@@ -313,10 +452,60 @@ internal class KopiaGenerationStore(private val image: AcquiredImage, private va
             save(output.resolve("inventory.native.json"), after.toByteArray())
             val removed = KopiaRetention.observe(before, after, plan)
             val result = KopiaRetentionObservation(observation, ReleaseLocks.sha256(planBytes), ReleaseLocks.sha256(after.toByteArray()),
-                removed, when { removed == plan.delete -> "deletion-observed"; removed.isEmpty() -> "unchanged"; else -> "partial" })
+                removed, when {
+                    removed.isEmpty() -> "unchanged"
+                    removed == plan.delete -> "deletion-observed"
+                    else -> "partial"
+                })
             save(output.resolve("observation.json"), json.encodeToString(result).toByteArray())
             result
         }
+
+    /** Two independently named, fresh read-only native censuses of a single pending deletion.
+     * This is a bounded terminal *readback*, not the missing original delete ACK and not
+     * permission to clear the pending operation. The controller must separately prove
+     * worker death, reference-writer exclusion and original custody before disposition.
+     */
+    fun observeRetentionReadback(repository: Path, custody: Path, generation: String,
+        firstId: String, secondId: String): KopiaRetentionReadback {
+        require(firstId != secondId && firstId.matches(Regex("r-[a-f0-9]{12}")) &&
+            secondId.matches(Regex("r-[a-f0-9]{12}")))
+        val first = observeRetention(repository, custody, generation, firstId)
+        val second = observeRetention(repository, custody, generation, secondId)
+        return ReleasePrivateFiles.locked(repository.parent) {
+            val pendingBytes = ReleasePrivateFiles.read(repository.parent.resolve("retention.pending.json"))
+            val pending = json.decodeFromString<Map<String, String>>(pendingBytes.decodeToString())
+            val id = pending.getValue("id")
+            require(pending.keys == setOf("generation", "id", "referenceHeadSha256") &&
+                pending.getValue("generation") == generation && id.matches(Regex("r-[a-f0-9]{12}")))
+            val operation = repository.parent.resolve("retention-$id")
+            val planBytes = ReleasePrivateFiles.read(operation.resolve("plan.json"))
+            val plan = json.decodeFromString<KopiaRetentionPlan>(planBytes.decodeToString())
+            require(plan.id == id && plan.generation == generation &&
+                plan.referenceHeadSha256 == pending.getValue("referenceHeadSha256"))
+            val planSha = ReleaseLocks.sha256(planBytes)
+            require(first.planSha256 == planSha && second.planSha256 == planSha)
+            val before = ReleasePrivateFiles.read(operation.resolve("before.native.json"), 1048576).decodeToString()
+            fun census(value: KopiaRetentionObservation): Map<String, kotlinx.serialization.json.JsonObject> {
+                val output = operation.resolve("observe-${value.id}")
+                val native = ReleasePrivateFiles.read(output.resolve("inventory.native.json"), 1048576)
+                require(ReleaseLocks.sha256(native) == value.inventorySha256 &&
+                    json.decodeFromString<KopiaRetentionObservation>(ReleasePrivateFiles.read(output.resolve("observation.json")).decodeToString()) == value)
+                require(KopiaRetention.observe(before, native.decodeToString(), plan) == value.removed)
+                return KopiaRetention.inventory(native.decodeToString())
+            }
+            require(census(first) == census(second) && first.removed == second.removed &&
+                first.status == second.status) { "Kopia retention readbacks disagree; retain uncertainty" }
+            val complete = first.removed == plan.delete
+            val disposition = when {
+                complete && plan.delete.isEmpty() -> "no-deletion-required-observed"
+                complete -> "planned-deletions-observed"
+                else -> "pending-or-partial; do-not-release"
+            }
+            KopiaRetentionReadback(generation = generation, pendingSha256 = ReleaseLocks.sha256(pendingBytes),
+                planSha256 = planSha, first = first, second = second, disposition = disposition)
+        }
+    }
 
     /** Low-level actuator only. The whole-release controller must supply a locked, verified reference authority.
      * No default authority, public deletion CLI, pin rewriting, broad expire, or physical blob cleanup.

@@ -30,11 +30,60 @@ internal object QbittorrentRuntime {
                 volumes = common.volumes + RuntimeMount("downloads", "/downloads"), readinessHttpPort = 8080)
         )).also { PrivateDeployment.validate(it) }
     }
+    fun canonicalFragment(inventory: AcquiredInventory, name: String): CanonicalProviderFragment {
+        val original = spec(inventory, name)
+        val fragment = original.copy(store = RuntimeStore.CANONICAL_V2,
+            networks = listOf("transfer-data", "transfer-web"), processes = original.processes.map { process ->
+                process.copy(id = if (process.oneShot) "qbittorrent-config-init" else process.id,
+                    dependencies = process.dependencies.map { if (it == "config-init") "qbittorrent-config-init" else it },
+                    environmentFile = process.environmentFile?.let { "qbittorrent-$it" },
+                    files = process.files.map { it.copy(file = "qbittorrent-${it.file}") },
+                    networks = if (process.oneShot) listOf("transfer-data") else listOf("transfer-data", "transfer-web"))
+            })
+        PrivateDeployment.validate(fragment)
+        return CanonicalProviderFragment("qbittorrent", fragment, webNetworks = setOf("transfer-web"))
+    }
+    fun canonicalInputs(): Map<String, String> = canonicalize(inputs(), fresh = false)
+
+    /** Fresh r9: the application's own PBKDF2 WebUI account and Caddy's native
+     * Basic gate MUST derive from the same issued password. Do not generate a
+     * second random credential in the generic legacy config producer. */
+    fun freshCanonicalInputs(nativePassword: String, salt: ByteArray = ByteArray(16).also {
+        SecureRandom().nextBytes(it)
+    }): Map<String, String> {
+        require(nativePassword.matches(Regex("[a-f0-9]{64}")))
+        val generated = inputs(nativePassword, salt)
+        // The daemon reads only the hashed native config; never leak the raw
+        // ingress password through its runtime environment file.
+        return canonicalize(generated + ("qbittorrent.env" to "HOME=/config\nXDG_CONFIG_HOME=/config\nXDG_DATA_HOME=/config\n"), fresh = true)
+    }
+    private fun canonicalize(source: Map<String, String>, fresh: Boolean): Map<String, String> = source
+        .mapKeys { (key, _) -> "qbittorrent-$key" }
+        .mapValues { (key, value) -> if (key == "qbittorrent-qbittorrent.conf") {
+            require("WebUI\\ServerDomains=qbittorrent\n" in value)
+            value.replace("WebUI\\ServerDomains=qbittorrent\n",
+                "WebUI\\ServerDomains=qbittorrent;torrents.datamancy.net${if (fresh) ";qbittorrent-native.datamancy.net" else ""}\n")
+        } else value }
+    fun coldRestoreFragment(fresh: CanonicalProviderFragment): CanonicalProviderFragment {
+        require(fresh.product == "qbittorrent" && fresh.spec.store == RuntimeStore.CANONICAL_V2 &&
+            fresh.spec.processes.map { it.id }.toSet() == setOf("qbittorrent-config-init", "qbittorrent") &&
+            fresh.spec.volumes.map { it.id }.toSet() == setOf("config", "downloads"))
+        val daemon = fresh.spec.processes.single { it.id == "qbittorrent" }
+        require(daemon.entrypoint == "/app/qbittorrent-nox" && daemon.dependencies == listOf("qbittorrent-config-init") &&
+            daemon.volumes == listOf(RuntimeMount("config", "/config"), RuntimeMount("downloads", "/downloads")))
+        return fresh.copy(spec = fresh.spec.copy(processes = listOf(daemon.copy(dependencies = emptyList()))).also {
+            PrivateDeployment.validate(it)
+        })
+    }
     fun prepare(inventory: AcquiredInventory, base: Path = PrivateDeployment.BASE, name: String = "qbittorrent", store: RuntimeStore = RuntimeStore.LEGACY): Path =
-        RuntimePreparation.prepare(spec(inventory, name).copy(store = store), base) {
-            val password = RuntimePreparation.password()
-            val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
-            mapOf("qbittorrent.env" to "HOME=/config\nXDG_CONFIG_HOME=/config\nXDG_DATA_HOME=/config\nP0V3_QBIT_PASSWORD=$password\n",
+        RuntimePreparation.prepare(spec(inventory, name).copy(store = store), base) { inputs() }
+
+    fun inputs(): Map<String, String> = inputs(RuntimePreparation.password(),
+        ByteArray(16).also { SecureRandom().nextBytes(it) })
+
+    private fun inputs(password: String, salt: ByteArray): Map<String, String> {
+            require(password.matches(Regex("[a-f0-9]{64}")) && salt.size == 16)
+            return mapOf("qbittorrent.env" to "HOME=/config\nXDG_CONFIG_HOME=/config\nXDG_DATA_HOME=/config\nP0V3_QBIT_PASSWORD=$password\n",
                 "qbittorrent.conf" to """
                     [LegalNotice]
                     Accepted=true
@@ -62,5 +111,5 @@ internal object QbittorrentRuntime {
                     WebUI\HostHeaderValidation=true
                     WebUI\ServerDomains=qbittorrent
                 """.trimIndent() + "\n")
-        }
+    }
 }

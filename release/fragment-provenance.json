@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Pinned reference provenance, not execution authority or a completion ledger",
+  "repository": "https://github.com/geraldsummers/p0-modules",
+  "commit": "36b6b74211036df8d425f8c6d6bec276c5f50aae",
+  "verification": "Git blob SHA-1 verified over blob header and bytes; SHA-256 calculated over the exact retrieved bytes",
+  "licenseReference": {
+    "path": "LICENSE",
+    "mode": "100644",
+    "blob": "be3f7b28e564e7dd05eaf59d64adba1a4065ac0e",
+    "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+    "description": "GNU Affero General Public License version 3 text; no additional per-file licensing grant inferred"
+  },
+  "sources": [
+    {
+      "path": "modules/postgres/legacy/stack.module.json",
+      "mode": "100644",
+      "blob": "1c906d056607102e3f8ae47bf9d084c0c6fcd3c6",
+      "sha256": "6554a305bb05ace33f4438590b32238994e6c97a31842018f9a9729066f17b8e",
+      "disposition": "reference-only",
+      "destination": "src/main/resources/fragments/v2/postgres/r1/fragment.yaml",
+      "reason": "Locate historical provider dependencies; do not import global bootstrap scripts or the second storage-tier provider"
+    },
+    {
+      "path": "modules/postgres/legacy/stack.runtime.yaml",
+      "mode": "100644",
+      "blob": "80966acf2c094f88a2bcaf0ca042cdf5d9220104",
+      "sha256": "6d9994d99757ff63219aebd0c98107e3b25a729b69813d044e02c0054cc78659",
+      "disposition": "reference-only",
+      "destination": "src/main/resources/fragments/v2/postgres/r1/fragment.yaml",
+      "reason": "Retain Timescale capability, not its old image, global daemon bootstrap credentials, automatic restart or host resource assumptions"
+    },
+    {
+      "path": "modules/forgejo/legacy/stack.module.json",
+      "mode": "100644",
+      "blob": "da01844f79cd1795de7c900096f1637613b98ce6",
+      "sha256": "0488048ab1655c92f27811ea46d71f409e71e48c123f66ee9d2615e1391c2f9f",
+      "disposition": "reference-only",
+      "destination": "src/main/resources/fragments/v2/forgejo/r1/fragment.yaml",
+      "reason": "Map application ownership without importing legacy init, OIDC or registration scripts"
+    },
+    {
+      "path": "modules/forgejo/legacy/stack.runtime.yaml",
+      "mode": "100644",
+      "blob": "df228fd556bf844ade36db5465c62acd72c3ee75",
+      "sha256": "e8efe6bc3c8ce24cfd9cd7a08c45deb417c14d584f3b7731ca481b7359dc0c78",
+      "disposition": "reference-only",
+      "destination": "src/main/resources/fragments/v2/forgejo/r1/fragment.yaml",
+      "reason": "Restore the PostgreSQL relationship in a new revision; use v3 TLS, role separation and initialization history instead of old mounts/environment/bootstrap behavior. Runner integration is a subsequent required revision, not completed here"
+    },
+    {
+      "path": "modules/forgejo-runner/legacy/stack.module.json",
+      "mode": "100644",
+      "blob": "f6783d69ce09bbd0e78d62286fb186cb2f8b8bf9",
+      "sha256": "21c91349e9b89b3fcaa9f5c6e5605593face135b32ad1d2f4d3177fb868c3d4f",
+      "disposition": "reference-only",
+      "destination": null,
+      "reason": "Runner is required within Forgejo ownership; no new runner fragment is packaged yet"
+    },
+    {
+      "path": "modules/forgejo-runner/legacy/stack.runtime.yaml",
+      "mode": "100644",
+      "blob": "45c7215b7bc18aaf0acccd7a433c0cb704e1a9ae",
+      "sha256": "01d5ab5fd753b8d506dc99328ab2c1dac07de069fbdadfed1a01d18717e81938",
+      "disposition": "reference-only",
+      "destination": null,
+      "reason": "Do not copy host SSH mounts, broad socket access, mutable local image tags, host labels or automatic restart. New trusted-private CI requires fresh dedicated Linux-account custody, not VMs"
+    }
+  ],
+  "copyPolicy": "No old source code or raw reference files are included in runtime resources. New declarations are authored against current v3 runtime types; review applicable notices before any future source adaptation. No old scripts were executed and no site secrets were copied."
+}

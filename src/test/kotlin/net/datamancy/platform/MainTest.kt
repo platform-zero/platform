@@ -7,9 +7,38 @@ import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class MainTest {
+    @Test fun `office observer cannot borrow ambient authority or accept an arbitrary callback key`(): Unit {
+        assertFailsWith<IllegalArgumentException> {
+            qualifiedOfficeCallbackReadback("q-0123456789ab", "office-callback-v2:" + "a".repeat(64), emptyMap())
+        }
+        assertFailsWith<IllegalArgumentException> {
+            qualifiedOfficeCallbackReadback("q-0123456789ab", "office-callback-v2:" + "a".repeat(64),
+                mapOf("P0V3_NATIVE_CASE_CLAIM_SHA256" to "not-a-claim", "P0V3_CASE_ARTIFACT_DIR" to "/tmp/must-not-read"))
+        }
+        val errors = mutableListOf<String>()
+        assertEquals(1, runCommand(arrayOf("office-callback-readonly", "q-0123456789ab", "arbitrary-sql-or-path"),
+            { error("No observation authorized") }, errors::add))
+        assertEquals(listOf("Office read-only observation rejected (IllegalArgumentException); no callback resend authorized"), errors)
+    }
+
+    @Test fun `native qualification CLI rejects foreign paths before opening files or invoking products`(): Unit {
+        val base = "/mnt/media/p0-v3/release-generations/q-0123456789ab"
+        for (path in listOf("/tmp/unit-secret-not-to-read.json",
+            "$base/bundle.json", "$base/native-qualification/../bundle.json",
+            "$base/native-qualification/case-unit/not-a-native-request.json")) {
+            val errors = mutableListOf<String>()
+            val output = mutableListOf<String>()
+            assertEquals(1, runCommand(arrayOf("qualification", "native-request", path), output::add, errors::add))
+            assertTrue(output.isEmpty())
+            assertEquals(listOf("Native qualification rejected (IllegalArgumentException); retain intents and do not replay"), errors)
+            assertFalse(errors.single().contains(path))
+        }
+    }
+
     @Test fun `integrated entrypoints reject absent input before any runtime effect`() {
         val root = Files.createTempDirectory("integrated-cli-unit-")
         try {

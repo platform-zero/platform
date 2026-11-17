@@ -1,0 +1,58 @@
+schemaVersion: 2
+id: private-jupyter-notebook
+revision: 1
+product: jupyter-notebook
+artifacts: [jupyter-notebook]
+providers: [caddy]
+providerProcesses:
+  caddy: [caddy]
+networks: [notebook-data, notebook-web, ingress-control]
+providerNetworks:
+  caddy: [ingress-control]
+webNetworks: [notebook-web]
+volumes:
+  - {id: home, userId: 1000}
+inputs:
+  - {name: jupyter-notebook-notebook.env, owner: jupyter-notebook, purpose: RUNTIME, consumers: [notebook-init, notebook]}
+  - {name: jupyter-notebook-server.py, owner: jupyter-notebook, purpose: RUNTIME, consumers: [notebook]}
+processes:
+  - id: notebook-init
+    artifact: jupyter-notebook
+    userId: 1000
+    oneShot: true
+    memoryMiB: 2048
+    networks: [notebook-data]
+    environmentFile: jupyter-notebook-notebook.env
+    entrypoint: /opt/conda/bin/python
+    command: ['-c', "from pathlib import Path; Path('/home/jovyan/work').mkdir(exist_ok=True)"]
+    volumes:
+      - {volume: home, target: /home/jovyan}
+  - id: notebook
+    artifact: jupyter-notebook
+    userId: 1000
+    memoryMiB: 2048
+    networks: [notebook-data, notebook-web, ingress-control]
+    environmentFile: jupyter-notebook-notebook.env
+    entrypoint: /opt/conda/bin/jupyter-lab
+    command: ['--config=/etc/jupyter/p0.py']
+    files:
+      - {file: jupyter-notebook-server.py, target: /etc/jupyter/p0.py}
+    volumes:
+      - {volume: home, target: /home/jovyan}
+    readiness:
+      - /opt/conda/bin/python
+      - -c
+      - "import os,urllib.request; r=urllib.request.Request('http://127.0.0.1:8888/api/status',headers={'Authorization':'token '+os.environ['P0V3_NOTEBOOK_TOKEN']}); assert urllib.request.build_opener(urllib.request.ProxyHandler({})).open(r,timeout=3).status==200"
+install:
+  processes: [notebook-init, notebook]
+  dependencies:
+    notebook-init: []
+    notebook: [notebook-init, caddy]
+restore:
+  processes: [notebook]
+  dependencies:
+    notebook: [caddy]
+  processOverrides:
+    notebook:
+      entrypoint: /bin/sh
+      command: ['-ec', 'test -d /home/jovyan/work; test ! -L /home/jovyan/work; exec /opt/conda/bin/jupyter-lab "$@"', restored-notebook, '--config=/etc/jupyter/p0.py']

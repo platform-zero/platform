@@ -28,6 +28,13 @@ internal object CompiledProcessOwners {
         "sogo-mail" to mapOf("db-ca.pem" to "postgres", "mail-ca.pem" to "mailserver"))
     fun inputOwner(recipe: String, file: String, consumerProducts: Set<String?>): String? {
         if (consumerProducts.isEmpty() || null in consumerProducts) return null
+        if (recipe in FragmentRecipes.recipeIds || recipe == CanonicalSharedYamlGraph.RECIPE) {
+            val owners = if (recipe == CanonicalSharedYamlGraph.RECIPE) CanonicalSharedYamlGraph.processOwners()
+                else FragmentRecipes.processOwners(recipe)
+            require(consumerProducts.all { it in owners.values }) { "Foreign fragment input consumer" }
+            return if (recipe == CanonicalSharedYamlGraph.RECIPE) CanonicalSharedYamlGraph.inputOwners()[file]
+                else FragmentRecipes.inputOwners(recipe)[file]
+        }
         if (consumerProducts.size == 1) return consumerProducts.single()
         return sharedInputs[recipe]?.get(file)?.also { require(it in consumerProducts) { "Shared input policy no longer matches its consumers" } }
     }
@@ -80,5 +87,6 @@ internal object CompiledProcessOwners {
         "sogo" to sogo,
         "mail" to mail,
         "sogo-mail" to (sogo + mail)
-    )
+    ) + FragmentRecipes.recipeIds.associateWith(FragmentRecipes::processOwners) +
+        mapOf(CanonicalSharedYamlGraph.RECIPE to CanonicalSharedYamlGraph.processOwners())
 }

@@ -75,6 +75,23 @@ class RecoveryAdmissionTest(unittest.TestCase):
         edit(obj)
         path.write_bytes(canonical(obj))
 
+    def test_first_install_requires_staged_bao_tls_daemon_and_no_recovery_lineage(self):
+        fresh = dict(self.bundle)
+        fresh.pop("recoverySourceKopia")
+        data = canonical(fresh)
+        (self.root / "bundle.json").write_bytes(data)
+        binding = {"generation": self.target, "member": "target-bao", "targetBundleSha256": digest(data),
+                   "endpoint": "https://bao:8200", "leafSha256": digest(b"\x01\x02\x03")}
+        (self.root / "stage.intent.json").write_bytes(canonical({"action": "stage", "bundleSha256": digest(data)}))
+        private_create(self.root / "target-bao.stage.intent.json", canonical({"action": "stage-member", "bundleSha256": digest(data)}))
+        private_create(self.root / "target-bao.stage.result.json", canonical([{"id": "bao", "state": "running", "exitCode": None}]))
+        result = recovery.verify_install(binding, generation_base=self.generations, runtime_base=self.runtime)
+        self.assertFalse(result["publicActivation"])
+        self.assertFalse(result["initialized"])
+        (self.root / "target-bao.stage.result.json").write_bytes(canonical([{"id": "bao", "state": "exited", "exitCode": 1}]))
+        with self.assertRaises(Refused):
+            recovery.verify_install(binding, generation_base=self.generations, runtime_base=self.runtime)
+
     def test_exact_original_snapshot_and_daemon_import_authorize_only_private_recovery(self):
         result = self.verify()
         self.assertEqual("1" * 32, result["snapshotId"])

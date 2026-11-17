@@ -27,7 +27,41 @@ class RecoveryCapsuleTest {
         try { test(root, archive, key, payloads, manifest) }
         finally { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
     }
-    @Test fun `encrypted capsule authenticates complete data and never claims functional restoration`() = fixture { _, archive, key, payloads, manifest ->
+    @Test fun `managed manifest extension preserves historical serialized bytes by default omission`() : Unit = fixture { _, _, _, _, manifest ->
+        val wire = kotlinx.serialization.json.Json { encodeDefaults = true }.encodeToString(CapsuleManifest.serializer(), manifest)
+        assertFalse("managedFiles" in wire)
+        assertFalse("credentialFiles" in wire)
+        assertEquals(manifest, kotlinx.serialization.json.Json.decodeFromString(CapsuleManifest.serializer(), wire))
+        assertTrue("managedFiles" in kotlinx.serialization.json.Json { encodeDefaults = true }.encodeToString(
+            CapsuleManifest.serializer(), manifest.copy(managedFiles = listOf("managed/home/source.tar"))))
+    }
+    @Test fun `capture intent pins effective head but legacy wire omits future head`() : Unit {
+        val intent = GenerationCaptureIntent(snapshot, generation, hash, emptyMap(), emptySet())
+        val json = kotlinx.serialization.json.Json { encodeDefaults = true }
+        assertFalse(json.encodeToString(GenerationCaptureIntent.serializer(), intent).contains("credentialHeadSha256"))
+        assertContains(json.encodeToString(GenerationCaptureIntent.serializer(),
+            intent.copy(credentialHeadSha256 = hash)), "credentialHeadSha256")
+    }
+    @Test fun `public credential partition is default omitted exact and rejects overlap or forged source`() : Unit = fixture { _, _, _, _, manifest ->
+        val head = CapsuleFile("credential-revisions/public/head.json", 128, hash)
+        val revision = CapsuleFile("credential-revisions/public/cert-${"1".repeat(24)}.json", 256, hash)
+        val declared = manifest.copy(files = manifest.files + head + revision, credentialFiles = listOf(head, revision))
+        RecoveryCredentialFiles.validate(declared)
+        val turnIntent = CapsuleFile("credential-revisions/public/turn/turn-123.intent.json", 128, hash)
+        val turnResult = CapsuleFile("credential-revisions/public/turn/turn-123.result.json", 256, hash)
+        RecoveryCredentialFiles.validate(declared.copy(files = declared.files + turnIntent + turnResult,
+            credentialFiles = declared.credentialFiles + turnIntent + turnResult))
+        assertFails { RecoveryCredentialFiles.validate(declared.copy(files = declared.files + turnResult,
+            credentialFiles = declared.credentialFiles + turnResult)) }
+        assertFails { RecoveryCredentialFiles.validate(declared.copy(credentialFiles = emptyList())) }
+        assertFails { RecoveryCredentialFiles.validate(declared.copy(credentialFiles = listOf(head))) }
+        assertFails { RecoveryCredentialFiles.validate(declared.copy(controllerFiles = listOf(head.name))) }
+        assertFails { RecoveryCredentialFiles.validate(declared.copy(credentialFiles = listOf(head, revision.copy(sha256 = "b".repeat(64))))) }
+        assertFails { RecoveryCredentialFiles.validate(declared.copy(files = manifest.files + head +
+            CapsuleFile("credential-revisions/public/foreign.json", 128, hash),
+            credentialFiles = listOf(head, CapsuleFile("credential-revisions/public/foreign.json", 128, hash)))) }
+    }
+    @Test fun `encrypted capsule authenticates complete data and never claims functional restoration`() : Unit = fixture { _, archive, key, payloads, manifest ->
         val result = RecoveryCapsule.create(archive, key, manifest, payloads)
         assertTrue(result.authenticated)
         assertFalse(result.functionalRestoreVerified)
@@ -38,7 +72,7 @@ class RecoveryCapsuleTest {
         assertFalse(Files.readAllBytes(archive).decodeToString().contains("synthetic private configuration"))
         assertFailsWith<Exception> { RecoveryCapsule.create(archive, key, manifest, payloads) }
     }
-    @Test fun `wrong key corruption truncation appended bytes and wrong scope all fail`() = fixture { root, archive, key, payloads, manifest ->
+    @Test fun `wrong key corruption truncation appended bytes and wrong scope all fail`() : Unit = fixture { root, archive, key, payloads, manifest ->
         RecoveryCapsule.create(archive, key, manifest, payloads)
         val original = Files.readAllBytes(archive)
         val wrong = privateFile(root.resolve("wrong-key"), ByteArray(64) { 7 })
@@ -56,7 +90,7 @@ class RecoveryCapsuleTest {
         assertFailsWith<IllegalArgumentException> { RecoveryCapsule.verify(archive, key, snapshot, "q-aaaaaaaaaaaa", hash) }
         assertFailsWith<IllegalArgumentException> { RecoveryCapsule.verify(archive, key, snapshot, generation, "b".repeat(64)) }
     }
-    @Test fun `unsafe payload names links modes budgets and stale declarations cannot be captured`() = fixture { root, archive, key, payloads, manifest ->
+    @Test fun `unsafe payload names links modes budgets and stale declarations cannot be captured`() : Unit = fixture { root, archive, key, payloads, manifest ->
         val source = payloads.values.first()
         for (name in listOf("../escape", "/absolute", "a//b", "a/./b", "manifest.json", "manifest.json/child", "bad\\path"))
             assertFailsWith<IllegalArgumentException> { RecoveryCapsule.describe(mapOf(name to source)) }
@@ -79,7 +113,7 @@ class RecoveryCapsuleTest {
         assertFailsWith<IllegalArgumentException> { RecoveryCapsule.create(archive, key, manifest, payloads) }
         assertFalse(Files.exists(key))
     }
-    @Test fun `extraction authenticates first preserves bytes and refuses destination reuse`() = fixture { root, archive, key, payloads, manifest ->
+    @Test fun `extraction authenticates first preserves bytes and refuses destination reuse`() : Unit = fixture { root, archive, key, payloads, manifest ->
         RecoveryCapsule.create(archive, key, manifest, payloads)
         val destination = root.resolve("extracted")
         val wrong = privateFile(root.resolve("wrong"), ByteArray(64))
@@ -95,7 +129,16 @@ class RecoveryCapsuleTest {
         assertFailsWith<Exception> { RecoveryCapsule.extract(archive, key, snapshot, generation, hash, destination) { Long.MAX_VALUE } }
         assertContentEquals(Files.readAllBytes(payloads.values.first()), Files.readAllBytes(destination.resolve(payloads.keys.first())))
     }
-    @Test fun `fresh capsules use distinct ciphertext and keys for identical payloads`() = fixture { root, archive, key, payloads, manifest ->
+    @Test fun `release-scale scratch admission is bounded before effects and never uses a fixed eight gigabyte plan`() : Unit {
+        val expected = 131072L * 1048576L * 4 + RecoveryCapsule.PROTECTED_HEADROOM + 536870912L
+        assertEquals(expected, RecoveryCapsule.requiredScratchBytes(131072, 4))
+        RecoveryCapsule.admitScratch(131072, 4, expected)
+        assertFails { RecoveryCapsule.admitScratch(131072, 4, expected - 1) }
+        assertFails { RecoveryCapsule.requiredScratchBytes(524289, 1) }
+        assertFails { RecoveryCapsule.requiredScratchBytes(131072, 5) }
+        assertFails { RecoveryCapsule.requiredScratchBytes(0, 1) }
+    }
+    @Test fun `fresh capsules use distinct ciphertext and keys for identical payloads`() : Unit = fixture { root, archive, key, payloads, manifest ->
         RecoveryCapsule.create(archive, key, manifest, payloads)
         val otherArchive = archive.parent.resolve("other.cap"); val otherKey = key.parent.resolve("other.key")
         RecoveryCapsule.create(otherArchive, otherKey, manifest.copy(id = "cap-aaaaaaaaaaaa"), payloads)

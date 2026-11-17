@@ -1,0 +1,159 @@
+schemaVersion: 2
+id: private-seafile
+revision: 2
+product: seafile
+artifacts: [seafile]
+providers: [mariadb, valkey, caddy]
+networks: [seafile-data, seafile-web, office-data]
+providerNetworks:
+  mariadb: [seafile-data]
+  valkey: [seafile-data]
+  caddy: [seafile-web]
+webNetworks: [seafile-web]
+exportedInputs: [seafile-ca.pem]
+volumes:
+  - {id: seafile-state, userId: 1000}
+  - {id: seafile-rpc, userId: 1000}
+inputs:
+  - {name: seafile-migration.env, owner: seafile, purpose: BOOTSTRAP, consumers: [seafile-schema-init]}
+  - {name: seafile-app.env, owner: seafile, purpose: RUNTIME, consumers: [seafile-server, seafile-users-init, seafile-backend]}
+  - {name: seafile-schema.py, owner: seafile, purpose: BOOTSTRAP, consumers: [seafile-schema-init]}
+  - {name: seafile-seahub-settings.py, owner: seafile, purpose: BOOTSTRAP, consumers: [seafile-schema-init]}
+  - {name: seafile-seafile.conf, owner: seafile, purpose: BOOTSTRAP, consumers: [seafile-schema-init]}
+  - {name: seafile-process-init.py, owner: seafile, purpose: RUNTIME, consumers: [seafile-server]}
+  - {name: seafile-users.py, owner: seafile, purpose: BOOTSTRAP, consumers: [seafile-users-init]}
+  - {name: seafile-users.json, owner: seafile, purpose: BOOTSTRAP, consumers: [seafile-users-init]}
+  - {name: seafile-seafile-web.py, owner: seafile, purpose: RUNTIME, consumers: [seafile-backend]}
+  - {name: seafile-office-callback-guard.py, owner: seafile, purpose: RUNTIME, consumers: [seafile-backend]}
+  - {name: seafile-office-ca-bundle.pem, owner: seafile, purpose: RUNTIME, consumers: [seafile-backend]}
+  - {name: seafile-nginx.conf, owner: seafile, purpose: RUNTIME, consumers: [seafile-files]}
+  - {name: seafile-ca.pem, owner: seafile, purpose: RUNTIME, consumers: [seafile-files]}
+  - {name: seafile-web.pem, owner: seafile, purpose: RUNTIME, consumers: [seafile-files]}
+  - {name: seafile-web-key.pem, owner: seafile, purpose: RUNTIME, consumers: [seafile-files]}
+  - {name: mariadb-ca.pem, owner: mariadb, purpose: RUNTIME, consumers: [seafile-schema-init, seafile-server, seafile-users-init, seafile-backend]}
+processes:
+  - id: seafile-schema-init
+    artifact: seafile
+    userId: 1000
+    oneShot: true
+    memoryMiB: 1024
+    networks: [seafile-data]
+    entrypoint: /usr/bin/python3
+    command: [/run/secrets/schema.py]
+    environmentFile: seafile-migration.env
+    volumes:
+      - {volume: seafile-state, target: /state}
+      - {volume: seafile-rpc, target: /rpc}
+    files:
+      - {file: seafile-schema.py, target: /run/secrets/schema.py}
+      - {file: seafile-seahub-settings.py, target: /run/secrets/seahub-settings.py}
+      - {file: seafile-seafile.conf, target: /run/secrets/seafile.conf}
+      - {file: mariadb-ca.pem, target: /run/secrets/mariadb-ca.pem}
+  - id: seafile-server
+    artifact: seafile
+    userId: 1000
+    memoryMiB: 1024
+    networks: [seafile-data]
+    entrypoint: /usr/bin/python3
+    environmentFile: seafile-app.env
+    volumes:
+      - {volume: seafile-state, target: /state}
+      - {volume: seafile-rpc, target: /rpc}
+    files:
+      - {file: seafile-process-init.py, target: /run/secrets/process-init.py}
+      - {file: mariadb-ca.pem, target: /run/secrets/mariadb-ca.pem}
+    command: [/run/secrets/process-init.py, /opt/seafile/seafile-server-13.0.28/seafile/bin/seaf-server, -c, /state/ccnet, -F, /state/conf, -d, /state/seafile-data, -l, /state/logs/seafile.log, -P, /tmp/seafile.pid, -p, /rpc, -f]
+    readiness: [/usr/bin/python3, -c, "from seaserv import ccnet_api; ccnet_api.get_emailusers('DB',0,1)"]
+  - id: seafile-users-init
+    artifact: seafile
+    userId: 1000
+    oneShot: true
+    memoryMiB: 1024
+    networks: [seafile-data]
+    entrypoint: /usr/bin/python3
+    command: [/run/secrets/users.py]
+    environmentFile: seafile-app.env
+    volumes:
+      - {volume: seafile-state, target: /state}
+      - {volume: seafile-rpc, target: /rpc}
+    files:
+      - {file: seafile-users.py, target: /run/secrets/users.py}
+      - {file: seafile-users.json, target: /run/secrets/users.json}
+      - {file: mariadb-ca.pem, target: /run/secrets/mariadb-ca.pem}
+  - id: seafile-backend
+    artifact: seafile
+    userId: 1000
+    memoryMiB: 1024
+    networks: [seafile-data, office-data]
+    entrypoint: /usr/bin/python3
+    command: [/run/secrets/seafile-web.py]
+    environmentFile: seafile-app.env
+    volumes:
+      - {volume: seafile-state, target: /state}
+      - {volume: seafile-rpc, target: /rpc}
+    files:
+      - {file: seafile-seafile-web.py, target: /run/secrets/seafile-web.py}
+      - {file: seafile-office-callback-guard.py, target: /run/secrets/office_callback_guard.py}
+      - {file: seafile-office-ca-bundle.pem, target: /run/secrets/office-ca-bundle.pem}
+      - {file: mariadb-ca.pem, target: /run/secrets/mariadb-ca.pem}
+    readiness: [/usr/bin/python3, -c, "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/api2/ping/',timeout=5); raise SystemExit(0 if r.status==200 else 1)"]
+  - id: seafile-files
+    artifact: seafile
+    userId: 1000
+    # r9-only one-worker nginx/TLS proxy, 512 connections, on-disk 10m body
+    # temp; not a second 1 GiB Seahub or seaf-server process.
+    memoryMiB: 256
+    networks: [seafile-data, seafile-web, office-data]
+    entrypoint: /usr/sbin/nginx
+    command: [-c, /run/secrets/nginx.conf, -g, 'daemon off;']
+    files:
+      - {file: seafile-nginx.conf, target: /run/secrets/nginx.conf}
+      - {file: seafile-ca.pem, target: /run/secrets/ca.pem}
+      - {file: seafile-web.pem, target: /run/secrets/web.pem}
+      - {file: seafile-web-key.pem, target: /run/secrets/web-key.pem}
+    readinessHttpPort: 8080
+    readinessHttpPath: /healthz
+install:
+  processes: [seafile-schema-init, seafile-server, seafile-users-init, seafile-backend, seafile-files]
+  dependencies:
+    seafile-schema-init: [mariadb]
+    seafile-server: [seafile-schema-init, valkey]
+    seafile-users-init: [seafile-server]
+    seafile-backend: [seafile-users-init]
+    seafile-files: [seafile-backend, caddy]
+  databaseAccess:
+    - {consumer: seafile-schema-init, provider: mariadb, volume: mariadb, database: ccnet_db, principal: seafile_migrate, credentialFile: seafile-migration.env, network: seafile-data}
+    - {consumer: seafile-server, provider: mariadb, volume: mariadb, database: ccnet_db, principal: seafile_runtime, credentialFile: seafile-app.env, network: seafile-data}
+    - {consumer: seafile-users-init, provider: mariadb, volume: mariadb, database: ccnet_db, principal: seafile_runtime, credentialFile: seafile-app.env, network: seafile-data}
+    - {consumer: seafile-backend, provider: mariadb, volume: mariadb, database: ccnet_db, principal: seafile_runtime, credentialFile: seafile-app.env, network: seafile-data}
+restore:
+  processes: [seafile-server, seafile-backend, seafile-files]
+  dependencies:
+    seafile-server: [mariadb, valkey]
+    seafile-backend: [seafile-server]
+    seafile-files: [seafile-backend, caddy]
+  processOverrides:
+    seafile-server:
+      entrypoint: /bin/sh
+      command:
+        - -ec
+        - 'test -d /state/seafile-data; test ! -L /state/seafile-data; test -s /state/conf/seahub_settings.py; test ! -L /state/conf/seahub_settings.py; exec /usr/bin/python3 "$@"'
+        - restored-seafile
+        - /run/secrets/process-init.py
+        - /opt/seafile/seafile-server-13.0.28/seafile/bin/seaf-server
+        - -c
+        - /state/ccnet
+        - -F
+        - /state/conf
+        - -d
+        - /state/seafile-data
+        - -l
+        - /state/logs/seafile.log
+        - -P
+        - /tmp/seafile.pid
+        - -p
+        - /rpc
+        - -f
+  databaseAccess:
+    - {consumer: seafile-server, provider: mariadb, volume: mariadb, database: ccnet_db, principal: seafile_runtime, credentialFile: seafile-app.env, network: seafile-data}
+    - {consumer: seafile-backend, provider: mariadb, volume: mariadb, database: ccnet_db, principal: seafile_runtime, credentialFile: seafile-app.env, network: seafile-data}

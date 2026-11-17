@@ -3,6 +3,8 @@ package net.datamancy.platform
 import java.nio.file.Path
 
 /** Private CE 10 memory-first editor plus native Seafile storage. No active-session durability claim. */
+internal data class CanonicalOfficeInputPair(val seafile: Map<String, String>, val onlyoffice: Map<String, String>)
+
 internal object OfficeRuntime {
     const val IMAGE = "localhost/p0v3-onlyoffice@sha256:48011079cf6ea448bf71cd88cd8f6e750750638163a3fa0f9ef541e625ede0cf"
     const val IMAGE_ID = "f6e0ea5288868f314c57a0dd67af7a2d32955ed67876e889df36858be359acf8"
@@ -28,6 +30,60 @@ internal object OfficeRuntime {
             processes = source.processes.filterNot { it.id in providers }.map { p ->
                 p.copy(dependencies = p.dependencies.filterNot { it in providers })
             }).also { PrivateDeployment.validate(it) }
+    }
+
+    /** ONLYOFFICE shares the single Seafile storage cohort; it contributes no duplicate SQL/cache or Seafile daemon. */
+    fun canonicalFragment(inventory: AcquiredInventory, name: String): CanonicalProviderFragment {
+        val legacy = spec(inventory, name)
+        val names = mapOf("office-state-init" to "onlyoffice-state-init", "docservice" to "onlyoffice-docservice",
+            "office" to "onlyoffice-front")
+        val owned = legacy.processes.filter { it.id in names }.map { p -> p.copy(id = names.getValue(p.id),
+            dependencies = p.dependencies.map(names::getValue),
+            volumes = p.volumes.map { it.copy(volume = "onlyoffice-${it.volume}") },
+            files = p.files.map { it.copy(file = "onlyoffice-${it.file}") },
+            environmentFile = p.environmentFile?.let { "onlyoffice-$it" },
+            networks = if (p.id == "office-state-init") listOf("office-data") else
+                listOf("office-data", "onlyoffice-web")) }
+        val fragment = legacy.copy(store = RuntimeStore.CANONICAL_V2, volumes = listOf(RuntimeVolume("onlyoffice-office", 1000)),
+            processes = owned, networks = listOf("office-data", "onlyoffice-web"))
+        PrivateDeployment.validate(fragment)
+        return CanonicalProviderFragment("onlyoffice", fragment, webNetworks = setOf("onlyoffice-web"))
+    }
+
+    /** One shared JWT, original Seafile identities, and distinct Office state/TLS. No future inputs on restore. */
+    fun canonicalInputs(migrationPassword: String, runtimePassword: String, cachePassword: String, mariaCa: String,
+        pki: (String) -> Map<String, String> = { PrivateWebPki.generate(
+            if (it == "files") "seafile-files" else "onlyoffice-front",
+            dnsNames = if (it == "files") listOf("seafile-files", "files.datamancy.net") else
+                listOf("onlyoffice-front", "office.datamancy.net")) }): CanonicalOfficeInputPair {
+        val generated = inputs(pki)
+        val seafile = SeafileRuntime.canonicalInputs(migrationPassword, runtimePassword, cachePassword,
+            mariaCa, office = generated) { error("Office must supply shared Seafile PKI once") }
+        val office = setOf("office.env", "office-log.json", "office.json", "office-nginx.conf", "office-ca.pem",
+            "office-web.pem", "office-web-key.pem", "process-init.py", "ca.pem")
+            .associate { file -> "onlyoffice-$file" to generated.getValue(file) }
+            .toMutableMap()
+        office["onlyoffice-office.json"] = office.getValue("onlyoffice-office.json")
+            .replace("\"address\":\"files\"", "\"address\":\"files.datamancy.net\"")
+            .replace("\"address\":\"office\"", "\"address\":\"onlyoffice-front\"")
+        office["onlyoffice-office-nginx.conf"] = office.getValue("onlyoffice-office-nginx.conf")
+            .replace("server_name office;", "server_name onlyoffice-front;")
+            .replace("server docservice:8000", "server onlyoffice-docservice:8000")
+        return CanonicalOfficeInputPair(seafile, office)
+    }
+
+    fun coldRestoreFragment(fresh: CanonicalProviderFragment): CanonicalProviderFragment {
+        require(fresh.product == "onlyoffice" && fresh.spec.processes.map { it.id }.toSet() ==
+            setOf("onlyoffice-state-init", "onlyoffice-docservice", "onlyoffice-front") &&
+            fresh.spec.processes.single { it.id == "onlyoffice-state-init" }.oneShot)
+        val active = fresh.spec.processes.filterNot { it.oneShot }.map { p ->
+            if (p.id != "onlyoffice-docservice") p else {
+                require(p.entrypoint == "/bin/sh" && p.command.size == 2 && p.command.first() == "-ec")
+                p.copy(dependencies = emptyList(), command = listOf("-ec",
+                    "test -d /state/cache/files; test ! -L /state/cache/files; " + p.command[1]))
+            }
+        }
+        return fresh.copy(spec = fresh.spec.copy(processes = active)).also { PrivateDeployment.validate(it.spec) }
     }
 
     fun applicationInputs(databasePassword: String, cachePassword: String,

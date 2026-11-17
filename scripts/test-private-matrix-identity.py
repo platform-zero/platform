@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Native private MAS/Keycloak/Synapse authorization and message persistence; never touches matrix-r2."""
+if not __debug__:
+    raise SystemExit('Optimized Python refused before imports or effects')
 import argparse
 import base64
 import hashlib

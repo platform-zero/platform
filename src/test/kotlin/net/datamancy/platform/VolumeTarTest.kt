@@ -30,9 +30,9 @@ class VolumeTarTest {
             return "$size $body".toByteArray()
         }
     }
-    private fun inspect(bytes: ByteArray): List<VolumeTarEntry> {
+    private fun inspect(bytes: ByteArray, mappedOwners: Set<Pair<Int, Int>> = emptySet()): List<VolumeTarEntry> {
         val file = Files.createTempFile("volume-tar-unit-", ".tar", PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
-        try { Files.write(file, bytes); return VolumeTar.inspect(file, 999) } finally { Files.delete(file) }
+        try { Files.write(file, bytes); return VolumeTar.inspect(file, 999, mappedOwners) } finally { Files.delete(file) }
     }
     @Test fun `preserve observed mount root around a native child-only archive without guessing missing metadata`() {
         val file = Files.createTempFile("volume-root-unit-", ".tar", PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
@@ -83,6 +83,29 @@ class VolumeTarTest {
         assertFails { VolumeTimestamp(0, -1) }; assertFails { VolumeTimestamp(0, 1000000000) }
     }
 
+    @Test fun `binary user attributes round trip as exact bytes not lossy UTF8 strings`() {
+        val raw = "SCHILY.xattr.user.binary=".toByteArray() + byteArrayOf(0, -1, 10, 61)
+        val body = raw + byteArrayOf(10)
+        var length = body.size + 3
+        while (length != body.size + length.toString().length + 1) length = body.size + length.toString().length + 1
+        val pax = "$length ".toByteArray() + body
+        val entry = inspect(tar(root(), member("meta", 'x', pax), member("binary"))).last()
+        assertEquals("0x00ff0a3d", entry.userXattrs["user.binary"])
+    }
+    @Test fun `mount root PAX round trips ACL default ACL and approved user xattrs without changing legacy encoding`() {
+        val file = Files.createTempFile("volume-root-attrs-", ".tar",
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
+        try {
+            Files.write(file, tar(member("data", data = "original".toByteArray())))
+            VolumeTar.prependRoot(file, 999, 999, 448, 123, 0,
+                "user::rwx,group::---,other::---", "user::rwx,group::---,other::---",
+                mapOf("user.source-id" to "0x6f726967696e616c"))
+            val root = VolumeTar.inspect(file, 999).first()
+            assertEquals("user::rwx,group::---,other::---", root.accessAcl)
+            assertEquals(root.accessAcl, root.defaultAcl)
+            assertEquals("0x6f726967696e616c", root.userXattrs["user.source-id"])
+        } finally { Files.delete(file) }
+    }
     @Test fun `root PAX preserves fractional and negative time while retaining child bytes`() {
         val file = Files.createTempFile("volume-time-unit-", ".tar", PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
         try {
@@ -104,11 +127,45 @@ class VolumeTarTest {
         val entry = inspect(tar(root())).single()
         val wire = json.encodeToString(VolumeTarEntry.serializer(), entry)
         assertFalse("modifiedNanos" in wire)
+        assertFalse("linkTarget" in wire || "linkKind" in wire || "accessAcl" in wire ||
+            "defaultAcl" in wire || "userXattrs" in wire)
         assertEquals(entry, json.decodeFromString(VolumeTarEntry.serializer(), wire))
         val changed = entry.copy(modifiedNanos = 1)
         assertEquals(changed, json.decodeFromString(VolumeTarEntry.serializer(), json.encodeToString(VolumeTarEntry.serializer(), changed)))
     }
 
+    @Test fun `mixed owners require exact typed mapping and root owner cannot change`() {
+        val archive = tar(root(), member("mapped", uid = 1234))
+        assertFails { inspect(archive) }
+        assertEquals(1234, inspect(archive, setOf(1234 to 1234)).last().uid)
+        assertFails { inspect(archive, setOf(1234 to 999)) } // cross-product owners are not mapped
+        assertFails { inspect(archive, setOf(0 to 0)) }
+        assertFails { inspect(tar(member("./", '5', byteArrayOf(), uid = 1234), member("state", uid = 999)), setOf(1234 to 1234)) }
+    }
+    @Test fun `same-volume links and approved user attributes are retained without broad native authority`() {
+        val attrs = pax("SCHILY.acl.access", "user::rw-,group::---,other::---") +
+            pax("SCHILY.xattr.user.original", "source-id")
+        val entries = inspect(tar(root(), member("dir/", '5', byteArrayOf(), mode = 448),
+            member("meta", 'x', attrs), member("dir/original", data = "original".toByteArray()),
+            member("dir/hard", '1', byteArrayOf(), link = "dir/original"),
+            member("dir/relative", '2', byteArrayOf(), link = "original")))
+        assertEquals("0x736f757263652d6964", entries.single { it.path == "dir/original" }.userXattrs["user.original"])
+        assertEquals("user::rw-,group::---,other::---", entries.single { it.path == "dir/original" }.accessAcl)
+        assertEquals("hard", entries.single { it.path == "dir/hard" }.linkKind)
+        assertEquals("symbolic", entries.single { it.path == "dir/relative" }.linkKind)
+        assertFails { inspect(tar(root(), member("missing", '1', byteArrayOf(), link = "dir/original"))) }
+        assertFails { inspect(tar(root(), member("original"), member("foreign", '1', byteArrayOf(), uid = 1234,
+            link = "original")), setOf(1234 to 1234)) }
+        assertFails { inspect(tar(root(), member("bad", '2', byteArrayOf(), link = "/etc/passwd"))) }
+        assertFails { inspect(tar(root(), member("bad", '2', byteArrayOf(), link = "../escape"))) }
+        assertFails { inspect(tar(root(), member("meta", 'x', pax("SCHILY.acl.access", "user:1234:r--,user::rw-,group::---,other::---")), member("bad"))) }
+        assertEquals("user:1234:r--,user::rw-,group::---,other::---", inspect(tar(root(),
+            member("meta", 'x', pax("SCHILY.acl.access", "user:1234:r--,user::rw-,group::---,other::---")),
+            member("mapped")), setOf(1234 to 1234)).last().accessAcl)
+        for (attribute in listOf("SCHILY.xattr.security.selinux", "SCHILY.xattr.trusted.overlay", "SCHILY.xattr.user.unknown/name"))
+            assertFails { inspect(tar(root(), member("meta", 'x', pax(attribute, "private")), member("bad"))) }
+        assertFails { inspect(tar(root(), member("meta", 'x', pax("SCHILY.acl.default", "user::rwx,group::---,other::---")), member("file"))) }
+    }
     @Test fun `reject traversal aliases links devices privileges foreign owners duplicates and missing parents`() {
         for (name in listOf("../escape", "/absolute", "a/../b", "a//b", "a\\b", "a\nb", "a/./b", "file/"))
             assertFailsWith<Exception>(name) { inspect(tar(root(), member(name))) }
@@ -126,7 +183,7 @@ class VolumeTarTest {
         for (bytes in listOf(valid.copyOf(10), valid.copyOf(valid.size - 513), valid + byteArrayOf(1),
             valid.clone().apply { this[0] = 88 }, valid.clone().apply { this[1024 + 7] = 1 }))
             assertFailsWith<Exception> { inspect(bytes) }
-        for (meta in listOf(pax("GNU.sparse.map", "0,1"), pax("path", "../escape"), pax("uid", "0"), pax("mtime", "not-a-time"), pax("ctime", "9999999999"), pax("gname", "bad\nname"),
+        for (meta in listOf(pax("GNU.sparse.map", "0,1"), pax("path", "../escape"), pax("uid", "0"), pax("mtime", "not-a-time"), pax("atime", "1700000000"), pax("ctime", "9999999999"), pax("gname", "bad\nname"),
             pax("path", "value") + pax("path", "other"), "999 path=x\n".toByteArray(), "bad\n".toByteArray()))
             assertFailsWith<Exception> { inspect(tar(root(), member("meta", 'x', meta), member("file"))) }
         assertFailsWith<IllegalArgumentException> { inspect(tar(root(), member("meta", 'x', pax("path", "value")))) }

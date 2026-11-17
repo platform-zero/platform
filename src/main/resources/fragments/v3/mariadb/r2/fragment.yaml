@@ -1,0 +1,92 @@
+schemaVersion: 2
+id: shared-mariadb
+revision: 2
+product: mariadb
+artifacts: [mariadb]
+networks: [maria-admin, maria-data]
+volumes:
+  - {id: mariadb, userId: 999}
+exportedInputs: [mariadb-ca.pem]
+inputs:
+  - {name: mariadb-bootstrap.env, owner: mariadb, purpose: BOOTSTRAP, consumers: [mariadb-init]}
+  - {name: mariadb-health.env, owner: mariadb, purpose: RUNTIME, consumers: [mariadb]}
+  - {name: mariadb-seafile-grants.env, owner: mariadb, purpose: BOOTSTRAP, consumers: [mariadb-init]}
+  - {name: mariadb-bookstack-grants.env, owner: mariadb, purpose: BOOTSTRAP, consumers: [mariadb-init]}
+  - {name: mariadb-erp-grants.env, owner: mariadb, purpose: BOOTSTRAP, consumers: [mariadb-init]}
+  - {name: mariadb-ca.pem, owner: mariadb, purpose: RUNTIME, consumers: [mariadb]}
+  - {name: mariadb.pem, owner: mariadb, purpose: RUNTIME, consumers: [mariadb]}
+  - {name: mariadb-key.pem, owner: mariadb, purpose: RUNTIME, consumers: [mariadb]}
+processes:
+  - id: mariadb-init
+    artifact: mariadb
+    userId: 999
+    oneShot: true
+    memoryMiB: 1024
+    networks: [maria-admin]
+    entrypoint: /bin/sh
+    environmentFile: mariadb-bootstrap.env
+    volumes:
+      - {volume: mariadb, target: /var/lib/mysql}
+    files:
+      - {file: mariadb-seafile-grants.env, target: /run/secrets/mariadb-seafile-grants.env}
+      - {file: mariadb-bookstack-grants.env, target: /run/secrets/mariadb-bookstack-grants.env}
+      - {file: mariadb-erp-grants.env, target: /run/secrets/mariadb-erp-grants.env}
+    command:
+      - -ec
+      - |
+        . /run/secrets/mariadb-seafile-grants.env
+        . /run/secrets/mariadb-bookstack-grants.env
+        . /run/secrets/mariadb-erp-grants.env
+        mariadb-install-db --no-defaults --datadir=/var/lib/mysql --auth-root-authentication-method=normal --skip-test-db
+        mariadbd --no-defaults --datadir=/var/lib/mysql --bootstrap --skip-networking <<SQL
+        DELETE FROM mysql.global_priv WHERE User = '' OR (User = 'root' AND Host <> 'localhost');
+        FLUSH PRIVILEGES;
+        ALTER USER 'root'@'localhost' IDENTIFIED BY '$MARIADB_ROOT_PASSWORD';
+        CREATE USER 'health'@'localhost' IDENTIFIED BY '$MARIADB_HEALTH_PASSWORD';
+        CREATE DATABASE ccnet_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        CREATE DATABASE seafile_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        CREATE DATABASE seahub_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        CREATE USER 'seafile_migrate'@'%' IDENTIFIED BY '$SEAFILE_MIGRATION_PASSWORD';
+        CREATE USER 'seafile_runtime'@'%' IDENTIFIED BY '$SEAFILE_RUNTIME_PASSWORD';
+        GRANT CREATE, ALTER, DROP, INDEX, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON ccnet_db.* TO 'seafile_migrate'@'%';
+        GRANT CREATE, ALTER, DROP, INDEX, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON seafile_db.* TO 'seafile_migrate'@'%';
+        GRANT CREATE, ALTER, DROP, INDEX, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON seahub_db.* TO 'seafile_migrate'@'%';
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ccnet_db.* TO 'seafile_runtime'@'%';
+        GRANT SELECT, INSERT, UPDATE, DELETE ON seafile_db.* TO 'seafile_runtime'@'%';
+        GRANT SELECT, INSERT, UPDATE, DELETE ON seahub_db.* TO 'seafile_runtime'@'%';
+        CREATE DATABASE bookstack CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        CREATE USER 'bookstack_migrate'@'%' IDENTIFIED BY '$BOOKSTACK_MIGRATION_PASSWORD';
+        CREATE USER 'bookstack_runtime'@'%' IDENTIFIED BY '$BOOKSTACK_RUNTIME_PASSWORD';
+        GRANT CREATE, ALTER, DROP, INDEX, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON bookstack.* TO 'bookstack_migrate'@'%';
+        GRANT SELECT, INSERT, UPDATE, DELETE ON bookstack.* TO 'bookstack_runtime'@'%';
+        CREATE DATABASE p0_erp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        CREATE USER 'p0_erp'@'%' IDENTIFIED BY '$ERP_MIGRATION_PASSWORD';
+        GRANT ALL PRIVILEGES ON p0_erp.* TO 'p0_erp'@'%';
+        CREATE USER 'erp_cutover'@'%' IDENTIFIED BY '$ERP_CUTOVER_PASSWORD';
+        GRANT CREATE USER ON *.* TO 'erp_cutover'@'%';
+        GRANT ALL PRIVILEGES ON p0_erp.* TO 'erp_cutover'@'%' WITH GRANT OPTION;
+        SQL
+  - id: mariadb
+    artifact: mariadb
+    userId: 999
+    memoryMiB: 1024
+    networks: [maria-admin, maria-data]
+    entrypoint: /usr/sbin/mariadbd
+    environmentFile: mariadb-health.env
+    volumes:
+      - {volume: mariadb, target: /var/lib/mysql}
+    files:
+      - {file: mariadb-ca.pem, target: /run/secrets/mariadb-ca.pem}
+      - {file: mariadb.pem, target: /run/secrets/mariadb.pem}
+      - {file: mariadb-key.pem, target: /run/secrets/mariadb-key.pem}
+    command: [--no-defaults, --datadir=/var/lib/mysql, --socket=/tmp/mysql.sock, --pid-file=/tmp/mysql.pid, --bind-address=0.0.0.0, --skip-name-resolve, --max-connections=64, --innodb-buffer-pool-size=128M, --require-secure-transport=ON, --ssl-ca=/run/secrets/mariadb-ca.pem, --ssl-cert=/run/secrets/mariadb.pem, --ssl-key=/run/secrets/mariadb-key.pem]
+    readiness: [/bin/sh, -ec, 'MYSQL_PWD="$MARIADB_HEALTH_PASSWORD" mariadb --no-defaults --socket=/tmp/mysql.sock -u health -Nse "SELECT 1" | grep -qx 1']
+install:
+  processes: [mariadb-init, mariadb]
+  dependencies:
+    mariadb-init: []
+    mariadb: [mariadb-init]
+restore:
+  processes: [mariadb]
+  dependencies:
+    mariadb: []

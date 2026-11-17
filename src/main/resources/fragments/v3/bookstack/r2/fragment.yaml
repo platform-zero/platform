@@ -1,0 +1,112 @@
+schemaVersion: 2
+id: private-bookstack
+revision: 2
+product: bookstack
+artifacts: [bookstack]
+providers: [mariadb, keycloak, caddy]
+networks: [bookstack-data, bookstack-web, identity-web]
+providerNetworks:
+  mariadb: [bookstack-data]
+  keycloak: [identity-web]
+  caddy: [bookstack-web]
+webNetworks: [bookstack-web]
+volumes:
+  - {id: bookstack-config, userId: 911}
+  - {id: bookstack-storage, userId: 911}
+  - {id: bookstack-cache, userId: 911}
+  - {id: bookstack-uploads, userId: 911}
+inputs:
+  - {name: bookstack-migration.env, owner: bookstack, purpose: BOOTSTRAP, consumers: [bookstack-migrate]}
+  - {name: bookstack-runtime.env, owner: bookstack, purpose: RUNTIME, consumers: [bookstack-php]}
+  - {name: bookstack-admin.php, owner: bookstack, purpose: BOOTSTRAP, consumers: [bookstack-migrate]}
+  - {name: bookstack-fpm.conf, owner: bookstack, purpose: RUNTIME, consumers: [bookstack-php]}
+  - {name: bookstack-health.php, owner: bookstack, purpose: RUNTIME, consumers: [bookstack-php]}
+  - {name: bookstack-closed-registration.php, owner: bookstack, purpose: RUNTIME, consumers: [bookstack-migrate, bookstack-php]}
+  - {name: bookstack-nginx.conf, owner: bookstack, purpose: RUNTIME, consumers: [bookstack]}
+  - {name: mariadb-ca.pem, owner: mariadb, purpose: RUNTIME, consumers: [bookstack-migrate, bookstack-php]}
+processes:
+  - id: bookstack-files-init
+    artifact: bookstack
+    userId: 911
+    oneShot: true
+    memoryMiB: 1024
+    networks: [bookstack-data]
+    entrypoint: /bin/sh
+    volumes:
+      - {volume: bookstack-config, target: /config}
+      - {volume: bookstack-storage, target: /seed/storage}
+      - {volume: bookstack-cache, target: /seed/cache}
+      - {volume: bookstack-uploads, target: /seed/uploads}
+    command:
+      - -ec
+      - >-
+        cp -R /app/www/storage/. /seed/storage/; cp -R /app/www/bootstrap/cache/. /seed/cache/;
+        mkdir -p /config/backups /config/log/bookstack /config/www/files /config/www/images /config/www/uploads /config/www/themes/p0v3-closed;
+        for folder in cache/data purifier sessions views; do mkdir -p /config/www/framework/$folder; done
+  - id: bookstack-migrate
+    artifact: bookstack
+    userId: 911
+    oneShot: true
+    memoryMiB: 1024
+    networks: [bookstack-data]
+    entrypoint: /bin/sh
+    environmentFile: bookstack-migration.env
+    volumes:
+      - {volume: bookstack-config, target: /config}
+      - {volume: bookstack-storage, target: /app/www/storage}
+      - {volume: bookstack-cache, target: /app/www/bootstrap/cache}
+      - {volume: bookstack-uploads, target: /config/www/uploads}
+    files:
+      - {file: bookstack-admin.php, target: /run/secrets/admin.php}
+      - {file: mariadb-ca.pem, target: /run/secrets/mariadb-ca.pem}
+      - {file: bookstack-closed-registration.php, target: /config/www/themes/p0v3-closed/functions.php}
+    command: [-ec, 'cd /app/www; php artisan migrate --force --no-interaction; php /run/secrets/admin.php; php artisan config:cache --no-interaction']
+  - id: bookstack-php
+    artifact: bookstack
+    userId: 911
+    memoryMiB: 1024
+    networks: [bookstack-data, bookstack-web, identity-web]
+    entrypoint: /usr/sbin/php-fpm85
+    command: [--nodaemonize, --fpm-config, /run/secrets/fpm.conf]
+    environmentFile: bookstack-runtime.env
+    volumes:
+      - {volume: bookstack-config, target: /config}
+      - {volume: bookstack-storage, target: /app/www/storage}
+      - {volume: bookstack-cache, target: /app/www/bootstrap/cache}
+      - {volume: bookstack-uploads, target: /config/www/uploads}
+    files:
+      - {file: bookstack-fpm.conf, target: /run/secrets/fpm.conf}
+      - {file: bookstack-health.php, target: /run/secrets/health.php}
+      - {file: mariadb-ca.pem, target: /run/secrets/mariadb-ca.pem}
+      - {file: bookstack-closed-registration.php, target: /config/www/themes/p0v3-closed/functions.php}
+    readiness: [/usr/bin/php, -r, "$s=fsockopen('127.0.0.1',9000,$e,$m,3); if(!$s)exit(1); fclose($s);"]
+  - id: bookstack
+    artifact: bookstack
+    userId: 911
+    memoryMiB: 256
+    networks: [bookstack-web]
+    entrypoint: /usr/sbin/nginx
+    command: [-e, /tmp/nginx-error.log, -c, /run/secrets/nginx.conf, -g, 'daemon off;']
+    volumes:
+      - {volume: bookstack-uploads, target: /config/www/uploads}
+    files:
+      - {file: bookstack-nginx.conf, target: /run/secrets/nginx.conf}
+    readinessHttpPort: 8080
+    readinessHttpPath: /healthz
+install:
+  processes: [bookstack-files-init, bookstack-migrate, bookstack-php, bookstack]
+  dependencies:
+    bookstack-files-init: []
+    bookstack-migrate: [mariadb, bookstack-files-init]
+    bookstack-php: [mariadb, keycloak, bookstack-migrate]
+    bookstack: [bookstack-php, caddy]
+  databaseAccess:
+    - {consumer: bookstack-migrate, provider: mariadb, volume: mariadb, database: bookstack, principal: bookstack_migrate, credentialFile: bookstack-migration.env, network: bookstack-data}
+    - {consumer: bookstack-php, provider: mariadb, volume: mariadb, database: bookstack, principal: bookstack_runtime, credentialFile: bookstack-runtime.env, network: bookstack-data}
+restore:
+  processes: [bookstack-php, bookstack]
+  dependencies:
+    bookstack-php: [mariadb, keycloak]
+    bookstack: [bookstack-php, caddy]
+  databaseAccess:
+    - {consumer: bookstack-php, provider: mariadb, volume: mariadb, database: bookstack, principal: bookstack_runtime, credentialFile: bookstack-runtime.env, network: bookstack-data}

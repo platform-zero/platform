@@ -1,0 +1,69 @@
+{
+    admin off
+    auto_https off
+    persist_config off
+}
+
+(finance_native_upstream) {
+    reverse_proxy firefly:8080 {
+        # Only server-owned canonical forwarding survives the stripping below.
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Host firefly.datamancy.net
+    }
+}
+
+:8081 {
+    # Native Passport is the only authentication on this deliberately narrow
+    # transport. Never forward browser cookies or claimed remote identities.
+    request_header -Cookie
+    request_header -Remote-*
+    request_header -Remote_*
+    request_header -Remote.*
+    request_header -X-*
+    request_header -X_*
+    request_header -X.*
+    request_header -X-Remote-*
+    request_header -X-Auth-*
+    request_header -X-Forwarded-*
+    request_header -X_Forwarded_*
+    request_header -X.Forwarded.*
+    request_header -X-Original-*
+    request_header -Forwarded
+    handle /healthz {
+        respond "Native API transport ready; not financial workflow acceptance." 200
+    }
+    @token {
+        method POST
+        path /oauth/token
+    }
+    handle @token {
+        import finance_native_upstream
+    }
+    @read {
+        method GET
+        header_regexp Authorization "^Bearer [A-Za-z0-9._~-]+$"
+        path_regexp "^/api/v1/(about(?:/user)?|accounts(?:/[0-9]+)?|currencies(?:/[A-Za-z0-9_]+)?|budgets|categories|bills|tags(?:/[0-9]+/transactions)?|transactions(?:/[0-9]+)?|preferences(?:/[a-z][a-z0-9_]*)?|search/(?:accounts|transactions(?:/count)?))$"
+    }
+    handle @read {
+        import finance_native_upstream
+    }
+    @create {
+        method POST
+        header_regexp Authorization "^Bearer [A-Za-z0-9._~-]+$"
+        path /api/v1/transactions /api/v1/tags /api/v1/batch/finish
+    }
+    handle @create {
+        import finance_native_upstream
+    }
+    @update {
+        method PUT DELETE
+        header_regexp Authorization "^Bearer [A-Za-z0-9._~-]+$"
+        path_regexp "^/api/v1/transactions/[0-9]+$"
+    }
+    handle @update {
+        import finance_native_upstream
+    }
+    handle {
+        respond "Native importer API route refused." 403
+    }
+}

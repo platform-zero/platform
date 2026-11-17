@@ -92,6 +92,7 @@ class WeeklyFunctionalVerifierTest {
                 }
                 override fun exitValue() = if (fault == "exit") 9 else 0
                 override fun destroy() { destroyed = true }
+                override fun descendants(): java.util.stream.Stream<ProcessHandle> = java.util.stream.Stream.empty()
             }
             try {
                 val invoke = {

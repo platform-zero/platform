@@ -49,6 +49,23 @@ class RecoverySegmentsTest {
         Files.write(destination.resolve(name), byteArrayOf(1))
         assertFails { RecoverySegments.materialize(destination, manifest) { Long.MAX_VALUE } }
     }
+    @Test fun `managed lane tar frames into physical payloads and binds the original logical digest`() = fixture { root, source, _ ->
+        val logical = "managed/workspace/tree.tar"
+        val payloads = linkedMapOf(logical to source)
+        val originalHash = RecoveryCapsule.fileHash(source)
+        val segments = RecoverySegments.prepare(payloads, 1024)
+        val item = segments.single()
+        assertEquals(logical, item.name)
+        assertEquals(originalHash, item.sha256)
+        assertTrue(item.segments.all { it in payloads })
+        val manifest = manifest(payloads, segments).copy(managedFiles = payloads.keys.toList())
+        RecoverySegments.validate(manifest)
+        assertFails { RecoverySegments.validate(manifest.copy(managedFiles = emptyList())) }
+        val recovered = restored(root, payloads)
+        RecoverySegments.materialize(recovered, manifest) { Long.MAX_VALUE }
+        assertEquals(originalHash, RecoveryCapsule.fileHash(recovered.resolve(logical)))
+        assertEquals(VolumeTar.inspect(source, 999), VolumeTar.inspect(recovered.resolve(logical), 999))
+    }
     @Test fun `no segments changes no legacy wire representation or payload map`() = fixture { _, source, payloads ->
         val volumes = RecoverySegments.prepare(payloads)
         assertTrue(volumes.isEmpty())

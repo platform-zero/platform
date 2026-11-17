@@ -1,0 +1,13 @@
+schemaVersion: 2
+provenanceSha256: 86742ba64f1437782dafdfeb518171f7cfd7756d1a5e42d2cbb733924a2fe101
+entries:
+  - id: postgres-timescale
+    revision: 1
+    resource: postgres/r1/fragment.yaml
+    sha256: 69b49ec7fc8cb02789515d56dbd5837cde539ddf873515547ba34c313875c3f9
+  - id: forgejo-postgres
+    revision: 5
+    resource: forgejo/r5/fragment.yaml
+    sha256: f94bbedaed30b97d87ecfc627ba989f284c69ff7ea85d51023feae37c8432611
+    templates:
+      app.ini.template: 7f826a981bdaac2274764fc942f7b0e9dfcbd272a07012e8ecdf9f45de90a4f3

@@ -25,9 +25,35 @@ internal object JellyfinRuntime {
                     apparmorProfile = "p0v3-private-v1", memoryMiB = 2048, readinessHttpPort = 8096, readinessHttpPath = "/Users/Public")
             )).also { PrivateDeployment.validate(it) }
     }
+    fun canonicalFragment(inventory: AcquiredInventory, name: String): CanonicalProviderFragment {
+        val original = spec(inventory, name)
+        val fragment = original.copy(store = RuntimeStore.CANONICAL_V2,
+            networks = listOf("media-data", "media-web"), processes = original.processes.map { process ->
+                process.copy(id = if (process.oneShot) "jellyfin-media-init" else process.id,
+                    dependencies = process.dependencies.map { if (it == "media-init") "jellyfin-media-init" else it },
+                    environmentFile = process.environmentFile?.let { "jellyfin-$it" },
+                    files = process.files.map { it.copy(file = "jellyfin-${it.file}") },
+                    networks = if (process.oneShot) listOf("media-data") else listOf("media-data", "media-web"))
+            })
+        PrivateDeployment.validate(fragment)
+        return CanonicalProviderFragment("jellyfin", fragment, webNetworks = setOf("media-web"))
+    }
+    fun canonicalInputs(): Map<String, String> = inputs().mapKeys { (key, _) -> "jellyfin-$key" }
+    fun coldRestoreFragment(fresh: CanonicalProviderFragment): CanonicalProviderFragment {
+        require(fresh.product == "jellyfin" && fresh.spec.store == RuntimeStore.CANONICAL_V2 &&
+            fresh.spec.processes.map { it.id }.toSet() == setOf("jellyfin-media-init", "jellyfin") &&
+            fresh.spec.volumes.map { it.id }.toSet() == setOf("config", "cache", "media"))
+        val server = fresh.spec.processes.single { it.id == "jellyfin" }
+        require(server.dependencies == listOf("jellyfin-media-init") && server.entrypoint == "/jellyfin/jellyfin" &&
+            server.volumes.any { it == RuntimeMount("media", "/media") })
+        return fresh.copy(spec = fresh.spec.copy(processes = listOf(server.copy(dependencies = emptyList()))).also {
+            PrivateDeployment.validate(it)
+        })
+    }
     fun prepare(inventory: AcquiredInventory, base: Path = PrivateDeployment.BASE, name: String = "jellyfin", store: RuntimeStore = RuntimeStore.LEGACY): Path =
-        RuntimePreparation.prepare(spec(inventory, name).copy(store = store), base) {
+        RuntimePreparation.prepare(spec(inventory, name).copy(store = store), base) { inputs() }
+
+    fun inputs(): Map<String, String> =
             mapOf("system.xml" to "<?xml version=\"1.0\" encoding=\"utf-8\"?><ServerConfiguration><IsStartupWizardCompleted>false</IsStartupWizardCompleted><PluginRepositories><RepositoryInfo><Name>Jellyfin Stable</Name><Url>https://repo.jellyfin.org/files/plugin/manifest.json</Url><Enabled>false</Enabled></RepositoryInfo></PluginRepositories><EnableAutomaticRestart>false</EnableAutomaticRestart></ServerConfiguration>\n",
                 "jellyfin.env" to "JELLYFIN_DATA_DIR=/config\nJELLYFIN_CONFIG_DIR=/config/config\nJELLYFIN_LOG_DIR=/config/log\nJELLYFIN_CACHE_DIR=/cache\nJELLYFIN_FFMPEG=/usr/lib/jellyfin-ffmpeg/ffmpeg\nP0V3_FIXTURE_PASSWORD=${RuntimePreparation.password()}\n")
-        }
 }

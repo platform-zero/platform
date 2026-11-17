@@ -54,6 +54,115 @@ internal object SynapseRuntime {
             .also { PrivateDeployment.validate(it) }
     }
 
+    /** Full-release contribution: one app-owned state volume and SQL principal on the ONE
+     * canonical PostgreSQL provider. Never include a second postgres process or volume.
+     */
+    fun canonicalFragment(inventory: AcquiredInventory, base: PrivateDeploymentSpec): CanonicalProviderFragment {
+        require(base.store == RuntimeStore.CANONICAL_V2 && base.processes.any { it.id == "postgres" && !it.oneShot })
+        val postgres = base.processes.single { it.id == "postgres" }
+        val image = inventory.images.single { it.product == "synapse" }.also {
+            require(it.os == "linux" && it.architecture == "amd64")
+        }
+        val init = RuntimeProcess("synapse-db-init", postgres.image, postgres.imageId, 999,
+            dependencies = listOf("postgres"), entrypoint = "/bin/sh", oneShot = true,
+            environmentFile = "synapse-db-admin.env", files = listOf(RuntimeFile("postgres-ca.pem", "/run/secrets/postgres-ca.pem")),
+            networks = listOf("db-admin", "synapse-data"), apparmorProfile = "p0v3-private-v1", command = listOf("-ec", """
+                export PGPASSWORD="${'$'}POSTGRES_PASSWORD"
+                psql -X -h postgres -U postgres -v ON_ERROR_STOP=1 <<SQL
+                CREATE ROLE synapse LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '${'$'}SYNAPSE_PASSWORD';
+                CREATE DATABASE synapse OWNER synapse ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0;
+                REVOKE ALL ON DATABASE synapse FROM PUBLIC;
+                SQL
+            """.trimIndent()))
+        val signing = RuntimeProcess("synapse-signing-key-init", image.pinnedImage, image.imageId, 991,
+            volumes = listOf(RuntimeMount("synapse", "/data")), networks = listOf("synapse-data"),
+            oneShot = true, apparmorProfile = "p0v3-private-v1", entrypoint = "/usr/local/bin/python",
+            command = listOf("-c", """
+                import os
+                from signedjson.key import generate_signing_key, write_signing_keys
+                os.umask(0o077)
+                with open('/data/homeserver.signing.key', 'x') as original:
+                    write_signing_keys(original, [generate_signing_key('p0v3')])
+            """.trimIndent()))
+        val daemon = RuntimeProcess("synapse", image.pinnedImage, image.imageId, 991,
+            dependencies = listOf("synapse-db-init", "synapse-signing-key-init"),
+            entrypoint = "/usr/local/bin/python", command = listOf("-m", "synapse.app.homeserver",
+                "--config-path", "/run/secrets/synapse-homeserver.yaml"),
+            environmentFile = "synapse-runtime.env", volumes = listOf(RuntimeMount("synapse", "/data")),
+            files = listOf(RuntimeFile("synapse-homeserver.yaml", "/run/secrets/synapse-homeserver.yaml"),
+                RuntimeFile("synapse-logging.yaml", "/run/secrets/synapse-logging.yaml"),
+                RuntimeFile("rtc-registration.yaml", "/run/secrets/rtc-registration.yaml"),
+                RuntimeFile("postgres-ca.pem", "/run/secrets/postgres-ca.pem")),
+            networks = listOf("synapse-data", "synapse-web"), memoryMiB = 1024,
+            apparmorProfile = "p0v3-private-v1", readinessHttpPort = 8008, readinessHttpPath = "/health")
+        val partial = PrivateDeploymentSpec(name = base.name, store = base.store,
+            volumes = listOf(RuntimeVolume("synapse", 991)), processes = listOf(init, signing, daemon),
+            networks = listOf("synapse-data", "synapse-web"), databaseAccess = listOf(
+                RuntimeDatabaseAccess("synapse", "postgres", "postgres", "synapse", "synapse", "synapse-runtime.env", "synapse-data")))
+        return CanonicalProviderFragment("synapse", partial, mapOf("postgres" to setOf("synapse-data")), setOf("synapse-web"))
+    }
+
+    fun canonicalColdFragment(inventory: AcquiredInventory, base: PrivateDeploymentSpec,
+        original: CanonicalProviderFragment): CanonicalProviderFragment {
+        val fresh = canonicalFragment(inventory, base)
+        require(original == fresh) { "Original Synapse source recipe or provider edge changed" }
+        val retired = setOf("synapse-db-init", "synapse-signing-key-init")
+        val daemon = fresh.spec.processes.single { it.id == "synapse" }
+        require(fresh.spec.processes.filter { it.oneShot }.map { it.id }.toSet() == retired &&
+            daemon.files.any { it.file == "synapse-homeserver.yaml" })
+        return fresh.copy(spec = fresh.spec.copy(processes = listOf(daemon.copy(
+            dependencies = daemon.dependencies.filterNot(retired::contains)))))
+    }
+
+    fun canonicalInputs(postgresAdminPassword: String, databasePassword: String,
+        serverName: String = "matrix.datamancy.net"): Map<String, String> {
+        require(serverName == "matrix.datamancy.net" &&
+            listOf(postgresAdminPassword, databasePassword).all { it.matches(Regex("[a-f0-9]{64}")) } &&
+            postgresAdminPassword != databasePassword)
+        return mapOf(
+            "synapse-db-admin.env" to "PGHOST=postgres\nPGUSER=postgres\nPGDATABASE=postgres\nPOSTGRES_PASSWORD=$postgresAdminPassword\nPGSSLMODE=verify-full\nPGSSLROOTCERT=/run/secrets/postgres-ca.pem\nSYNAPSE_PASSWORD=$databasePassword\n",
+            "synapse-runtime.env" to "TZ=UTC\nSYNAPSE_DB_PASSWORD=$databasePassword\n",
+            "synapse-logging.yaml" to "version: 1\nhandlers:\n  console:\n    class: logging.StreamHandler\n    stream: ext://sys.stdout\nroot:\n  level: WARNING\n  handlers: [console]\ndisable_existing_loggers: false\n",
+            "synapse-homeserver.yaml" to """
+                server_name: $serverName
+                public_baseurl: https://$serverName/
+                pid_file: /tmp/synapse.pid
+                listeners:
+                  - port: 8008
+                    tls: false
+                    type: http
+                    bind_addresses: ['0.0.0.0']
+                    x_forwarded: true
+                    resources:
+                      - names: [client, openid]
+                        compress: false
+                database:
+                  name: psycopg2
+                  args:
+                    user: synapse
+                    password: '$databasePassword'
+                    database: synapse
+                    host: postgres
+                    port: 5432
+                    sslmode: verify-full
+                    sslrootcert: /run/secrets/postgres-ca.pem
+                    cp_min: 2
+                    cp_max: 5
+                media_store_path: /data/media
+                signing_key_path: /data/homeserver.signing.key
+                log_config: /run/secrets/synapse-logging.yaml
+                report_stats: false
+                enable_registration: false
+                allow_guest_access: false
+                trusted_key_servers: []
+                federation_domain_whitelist: []
+                allow_public_rooms_without_auth: false
+                allow_public_rooms_over_federation: false
+                url_preview_enabled: false
+                max_upload_size: 10M
+            """.trimIndent() + "\n")
+    }
+
     fun inputs(publicBaseUrl: String = "http://synapse:8008/"): Map<String, String> {
             require(publicBaseUrl in setOf("http://synapse:8008/", "https://element:8443/"))
             val pg = RuntimePreparation.password()

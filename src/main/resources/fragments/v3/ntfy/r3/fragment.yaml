@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 2,
+  "id": "shared-ntfy",
+  "revision": 3,
+  "product": "ntfy",
+  "artifacts": [
+    "ntfy"
+  ],
+  "networks": [
+    "ntfy-private",
+    "ntfy-web"
+  ],
+  "volumes": [
+    {
+      "id": "ntfy",
+      "userId": 65532
+    }
+  ],
+  "inputs": [
+    {
+      "name": "ntfy-config.yml",
+      "owner": "ntfy",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "ntfy"
+      ]
+    }
+  ],
+  "processes": [
+    {
+      "id": "ntfy",
+      "artifact": "ntfy",
+      "userId": 65532,
+      "memoryMiB": 256,
+      "networks": [
+        "ntfy-private",
+        "ntfy-web"
+      ],
+      "volumes": [
+        {
+          "volume": "ntfy",
+          "target": "/var/cache/ntfy"
+        }
+      ],
+      "command": [
+        "serve",
+        "--config=/run/secrets/ntfy.yml"
+      ],
+      "readiness": [
+        "/bin/sh",
+        "-ec",
+        "wget -q -O - http://127.0.0.1:8080/v1/health | grep -q '\"healthy\":true'"
+      ],
+      "files": [
+        {
+          "file": "ntfy-config.yml",
+          "target": "/run/secrets/ntfy.yml"
+        }
+      ]
+    }
+  ],
+  "install": {
+    "processes": [
+      "ntfy"
+    ],
+    "dependencies": {
+      "ntfy": []
+    }
+  },
+  "restore": {
+    "processes": [
+      "ntfy"
+    ],
+    "dependencies": {
+      "ntfy": []
+    }
+  },
+  "webNetworks": [
+    "ntfy-web"
+  ]
+}

@@ -1,0 +1,99 @@
+schemaVersion: 2
+id: private-opensearch
+revision: 1
+product: opensearch
+artifacts: [opensearch]
+networks: [opensearch-data]
+volumes:
+  - {id: opensearch-config, userId: 1000}
+  - {id: opensearch-data, userId: 1000}
+inputs:
+  - {name: opensearch-search.env, owner: opensearch, purpose: RUNTIME, consumers: [opensearch-config-init, opensearch]}
+  - {name: opensearch-admin.env, owner: opensearch, purpose: BOOTSTRAP, consumers: [opensearch-security-init]}
+  - {name: opensearch-ca.pem, owner: opensearch, purpose: RUNTIME, consumers: [opensearch, opensearch-security-init]}
+  - {name: opensearch-node.pem, owner: opensearch, purpose: RUNTIME, consumers: [opensearch, opensearch-security-init]}
+  - {name: opensearch-node-key.pem, owner: opensearch, purpose: RUNTIME, consumers: [opensearch, opensearch-security-init]}
+  - {name: opensearch-admin.pem, owner: opensearch, purpose: BOOTSTRAP, consumers: [opensearch-security-init]}
+  - {name: opensearch-admin-key.pem, owner: opensearch, purpose: BOOTSTRAP, consumers: [opensearch-security-init]}
+  - {name: opensearch-opensearch.yml, owner: opensearch, purpose: RUNTIME, consumers: [opensearch]}
+  - {name: opensearch-security.yml, owner: opensearch, purpose: BOOTSTRAP, consumers: [opensearch-security-init]}
+  - {name: opensearch-roles.yml, owner: opensearch, purpose: BOOTSTRAP, consumers: [opensearch-security-init]}
+  - {name: opensearch-roles-mapping.yml, owner: opensearch, purpose: BOOTSTRAP, consumers: [opensearch-security-init]}
+  - {name: opensearch-internal-users.yml, owner: opensearch, purpose: BOOTSTRAP, consumers: [opensearch-security-init]}
+processes:
+  - id: opensearch-config-init
+    artifact: opensearch
+    userId: 1000
+    oneShot: true
+    memoryMiB: 512
+    networks: [opensearch-data]
+    environmentFile: opensearch-search.env
+    entrypoint: /bin/sh
+    volumes:
+      - {volume: opensearch-config, target: /config}
+      - {volume: opensearch-data, target: /data}
+    command: [-ec, "cp -a /usr/share/opensearch/config/. /config/; rm -f /config/*.pem; sed -i 's|file=logs/gc.log|file=/tmp/logs/gc.log|g' /config/jvm.options; mkdir -p /data/index"]
+  - id: opensearch
+    artifact: opensearch
+    userId: 1000
+    memoryMiB: 2048
+    networks: [opensearch-data]
+    environmentFile: opensearch-search.env
+    entrypoint: /bin/sh
+    command: [-ec, 'mkdir -p /tmp/logs; exec /usr/share/opensearch/bin/opensearch']
+    volumes:
+      - {volume: opensearch-config, target: /config}
+      - {volume: opensearch-data, target: /data}
+    files:
+      - {file: opensearch-ca.pem, target: /config/ca.pem}
+      - {file: opensearch-node.pem, target: /config/node.pem}
+      - {file: opensearch-node-key.pem, target: /config/node-key.pem}
+      - {file: opensearch-opensearch.yml, target: /config/opensearch.yml}
+    readiness:
+      - /bin/sh
+      - -ec
+      - |
+        set -- --silent --show-error --max-time 5 --cacert /config/ca.pem --cert /config/node.pem --key /config/node-key.pem
+        if test -f /data/.p0-security-ready; then
+          curl "$@" --fail --output /dev/null 'https://opensearch:9200/_cluster/health'
+        else
+          code=$(curl "$@" --output /tmp/bootstrap-response --write-out '%{http_code}' https://opensearch:9200/)
+          test "$code" = 503 && grep -q 'Security not initialized' /tmp/bootstrap-response
+        fi
+  - id: opensearch-security-init
+    artifact: opensearch
+    userId: 1000
+    oneShot: true
+    memoryMiB: 512
+    networks: [opensearch-data]
+    environmentFile: opensearch-admin.env
+    entrypoint: /bin/sh
+    volumes:
+      - {volume: opensearch-config, target: /config}
+      - {volume: opensearch-data, target: /data}
+    files:
+      - {file: opensearch-ca.pem, target: /config/ca.pem}
+      - {file: opensearch-node.pem, target: /config/node.pem}
+      - {file: opensearch-node-key.pem, target: /config/node-key.pem}
+      - {file: opensearch-admin.pem, target: /config/admin.pem}
+      - {file: opensearch-admin-key.pem, target: /config/admin-key.pem}
+      - {file: opensearch-security.yml, target: /config/opensearch-security/config.yml}
+      - {file: opensearch-roles.yml, target: /config/opensearch-security/roles.yml}
+      - {file: opensearch-roles-mapping.yml, target: /config/opensearch-security/roles_mapping.yml}
+      - {file: opensearch-internal-users.yml, target: /config/opensearch-security/internal_users.yml}
+    command:
+      - -ec
+      - >-
+        /usr/share/opensearch/plugins/opensearch-security/tools/securityadmin.sh -h opensearch -p 9200 -icl -cd /config/opensearch-security -cacert /config/ca.pem -cert /config/admin.pem -key /config/admin-key.pem &&
+        curl --silent --show-error --fail --max-time 30 --cacert /config/ca.pem --cert /config/node.pem --key /config/node-key.pem 'https://opensearch:9200/_cluster/health?wait_for_status=yellow&timeout=20s' &&
+        printf 'ready\n' > /data/.p0-security-ready
+install:
+  processes: [opensearch-config-init, opensearch, opensearch-security-init]
+  dependencies:
+    opensearch-config-init: []
+    opensearch: [opensearch-config-init]
+    opensearch-security-init: [opensearch]
+restore:
+  processes: [opensearch]
+  dependencies:
+    opensearch: []

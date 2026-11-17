@@ -1,0 +1,3974 @@
+{
+  "schemaVersion": 2,
+  "id": "canonical-shared-core-v3",
+  "revision": 10,
+  "scope": "full-private",
+  "fragments": [
+    {
+      "id": "postgres-timescale",
+      "revision": 1
+    },
+    {
+      "id": "forgejo-postgres",
+      "revision": 5
+    },
+    {
+      "id": "shared-valkey-acl",
+      "revision": 2
+    },
+    {
+      "id": "shared-ntfy",
+      "revision": 3
+    },
+    {
+      "id": "planka-postgres",
+      "revision": 2
+    },
+    {
+      "id": "shared-mariadb",
+      "revision": 2
+    },
+    {
+      "id": "shared-memcached",
+      "revision": 1
+    },
+    {
+      "id": "identity-keycloak",
+      "revision": 3
+    },
+    {
+      "id": "private-alertmanager",
+      "revision": 2
+    },
+    {
+      "id": "private-prometheus",
+      "revision": 2
+    },
+    {
+      "id": "private-loki",
+      "revision": 1
+    },
+    {
+      "id": "private-alloy",
+      "revision": 1
+    },
+    {
+      "id": "private-node-exporter",
+      "revision": 1
+    },
+    {
+      "id": "private-grafana",
+      "revision": 2
+    },
+    {
+      "id": "private-bookstack",
+      "revision": 4
+    },
+    {
+      "id": "private-caddy",
+      "revision": 3
+    },
+    {
+      "id": "private-crowdsec",
+      "revision": 1
+    },
+    {
+      "id": "private-donetick",
+      "revision": 3
+    },
+    {
+      "id": "private-element",
+      "revision": 2
+    },
+    {
+      "id": "private-erpnext",
+      "revision": 1
+    },
+    {
+      "id": "private-firefly-iii",
+      "revision": 5
+    },
+    {
+      "id": "private-homeassistant",
+      "revision": 1
+    },
+    {
+      "id": "private-huly",
+      "revision": 1
+    },
+    {
+      "id": "private-jellyfin",
+      "revision": 1
+    },
+    {
+      "id": "private-jupyter-notebook",
+      "revision": 1
+    },
+    {
+      "id": "private-jupyterhub",
+      "revision": 1
+    },
+    {
+      "id": "private-keycloak-auth-gateway",
+      "revision": 1
+    },
+    {
+      "id": "private-keykeeper-bao-oidc",
+      "revision": 1
+    },
+    {
+      "id": "private-livekit-matrix-rtc",
+      "revision": 1
+    },
+    {
+      "id": "private-native-mailserver",
+      "revision": 1
+    },
+    {
+      "id": "private-mastodon-shared-redis-bridge",
+      "revision": 5
+    },
+    {
+      "id": "private-matrix-authentication-service",
+      "revision": 3
+    },
+    {
+      "id": "private-onlyoffice",
+      "revision": 1
+    },
+    {
+      "id": "private-openbao",
+      "revision": 1
+    },
+    {
+      "id": "private-opensearch",
+      "revision": 2
+    },
+    {
+      "id": "private-portal",
+      "revision": 1
+    },
+    {
+      "id": "private-qbittorrent",
+      "revision": 1
+    },
+    {
+      "id": "private-seafile",
+      "revision": 2
+    },
+    {
+      "id": "private-searxng",
+      "revision": 1
+    },
+    {
+      "id": "private-sogo-mail-groupware",
+      "revision": 2
+    },
+    {
+      "id": "private-synapse",
+      "revision": 1
+    }
+  ],
+  "integratedReference": {
+    "repository": "geraldsummers/p0-modules",
+    "commit": "36b6b74211036df8d425f8c6d6bec276c5f50aae",
+    "generatorRepository": "geraldsummers/sso-stack-generator",
+    "generatorCommit": "42bd13939bc95439b3237cd3f53b06d03f6b85d4",
+    "generatorSha256": "92aaf2c9bbeea10c6cbe1b91bbc3950dda6548431ffd80fadf35629ee1deb1e6",
+    "routeSourceSha256": "cd5297dd239b573ea677539a61415a21cd0ed9d32917b064120ea640862775e6",
+    "modules": [
+      {
+        "id": "alertmanager",
+        "role": "selected",
+        "descriptorSha256": "d5ed4752f91b0914f8d889a7c7542a6c50ab93ad4151c68d267051a8b18eaa0f",
+        "runtimeSha256": "492cad3ca27c84ffa1b01509568925d7304cc5dee21ab846f5af7eaf375f6866",
+        "services": [
+          {
+            "id": "alertmanager",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "caddy",
+              "monitoring"
+            ],
+            "state": [
+              "alertmanager_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "alertmanager"
+        ],
+        "privateRoutes": [
+          {
+            "label": "alerts",
+            "host": "alerts.datamancy.net",
+            "policy": "GROUP",
+            "process": "alertmanager",
+            "network": "alerts-web",
+            "port": 9093,
+            "groups": "admins|operators"
+          }
+        ]
+      },
+      {
+        "id": "alloy",
+        "role": "selected",
+        "descriptorSha256": "f5434c9afcda5cfa481a6588aea8e76c9f27cc070ef3f5b0262a303a24ed1b8d",
+        "runtimeSha256": "ee7439fb48d9071814474f7ad7a547b52ddd1d4dd0d196bbf23e4488bf4d36d3",
+        "services": [
+          {
+            "id": "alloy",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "loki"
+            ],
+            "networks": [
+              "monitoring"
+            ],
+            "state": []
+          }
+        ],
+        "nativeDaemons": [
+          "alloy"
+        ]
+      },
+      {
+        "id": "bookstack",
+        "role": "selected",
+        "descriptorSha256": "d2e09ec9785583495211a09ef31e018116dc6a26ee1010454ce98c4c96b33c68",
+        "runtimeSha256": "f83a778bc7085d7c391a7470355faab738f6ae3d99ff1b58d09f94b9609c1c06",
+        "services": [
+          {
+            "id": "bookstack",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "mariadb"
+            ],
+            "networks": [
+              "caddy",
+              "mariadb"
+            ],
+            "state": [
+              "bookstack_data"
+            ]
+          },
+          {
+            "id": "bookstack-procedural-docs",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "bookstack"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": []
+          }
+        ],
+        "nativeDaemons": [
+          "bookstack-php",
+          "bookstack"
+        ],
+        "privateRoutes": [
+          {
+            "label": "bookstack",
+            "host": "bookstack.datamancy.net",
+            "policy": "APP",
+            "process": "bookstack",
+            "network": "bookstack-web",
+            "port": 8080
+          },
+          {
+            "label": "api.bookstack",
+            "host": "api.bookstack.datamancy.net",
+            "policy": "NATIVE",
+            "process": "bookstack",
+            "network": "bookstack-web",
+            "port": 8080,
+            "special": "bookstack-api"
+          }
+        ]
+      },
+      {
+        "id": "caddy",
+        "role": "selected",
+        "descriptorSha256": "39c9e058514c7649664572c939e616da421d5eb710f778a82b70639ee40876c0",
+        "runtimeSha256": "612d077af0ff1ac7a831de4b51d4e5d951aafee583b50cdd419a9839785f3121",
+        "services": [
+          {
+            "id": "caddy",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "ai",
+              "caddy",
+              "mailserver",
+              "mariadb",
+              "mastodon-internal",
+              "matrix-internal",
+              "memcached",
+              "monitoring",
+              "postgres",
+              "qdrant"
+            ],
+            "state": [
+              "caddy_ca",
+              "caddy_certs",
+              "caddy_config",
+              "caddy_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "caddy"
+        ],
+        "privateRoutes": [
+          {
+            "label": "www.datamancy.net",
+            "host": "www.datamancy.net",
+            "policy": "REDIRECT",
+            "special": "apex-redirect"
+          },
+          {
+            "label": "control.datamancy.net",
+            "host": "control.datamancy.net",
+            "policy": "CONTROL",
+            "special": "controller"
+          },
+          {
+            "label": "api.datamancy.net",
+            "host": "api.datamancy.net",
+            "policy": "CONTROL",
+            "special": "agent-api"
+          }
+        ]
+      },
+      {
+        "id": "crowdsec",
+        "role": "selected",
+        "descriptorSha256": "397a133fcfe0f0354cbc6a7d6016f9c7c9d02cab049148cbc034c45a5e8fdd72",
+        "runtimeSha256": "020b66f78fdf3d4c25e5cee73afb12553be79cd7ddbbdece60d1707d2535a0a0",
+        "services": [
+          {
+            "id": "crowdsec",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy"
+            ],
+            "networks": [
+              "caddy",
+              "monitoring"
+            ],
+            "state": [
+              "crowdsec_config",
+              "crowdsec_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "guard"
+        ]
+      },
+      {
+        "id": "donetick",
+        "role": "selected",
+        "descriptorSha256": "1a864705fcff172110b61be8b5bda8036a4e6199ad295d77434e6b7e7c073f96",
+        "runtimeSha256": "82786905b4a3ceeab69eed772ede8bf4fe7fd9c061a0ec92960bf19451dd90f3",
+        "services": [
+          {
+            "id": "donetick",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": [
+              "caddy_ca",
+              "donetick_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "donetick"
+        ],
+        "privateRoutes": [
+          {
+            "label": "donetick",
+            "host": "donetick.datamancy.net",
+            "policy": "GROUP",
+            "process": "donetick",
+            "network": "donetick-web",
+            "port": 2021,
+            "special": "donetick",
+            "groups": "users|operators|admins"
+          },
+          {
+            "label": "donetick-native",
+            "host": "donetick-native.datamancy.net",
+            "policy": "NATIVE",
+            "process": "donetick",
+            "network": "donetick-web",
+            "port": 2021,
+            "special": "donetick-native"
+          }
+        ]
+      },
+      {
+        "id": "element",
+        "role": "selected",
+        "descriptorSha256": "96a1d0106c772a29bbca5efe0699a7832a91bc18f5c2a259145f6338a57c13c5",
+        "runtimeSha256": "80a823ce983a99f536f8d23dbc3a16b1c545f7aca53a3fe6ac25bd3983fec86f",
+        "services": [
+          {
+            "id": "element",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "synapse"
+            ],
+            "networks": [
+              "caddy",
+              "matrix-internal"
+            ],
+            "state": [
+              "element_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "element-web"
+        ],
+        "privateRoutes": [
+          {
+            "label": "element",
+            "host": "element.datamancy.net",
+            "policy": "APP",
+            "process": "element-web",
+            "network": "element-web",
+            "port": 8080
+          },
+          {
+            "label": "chat",
+            "host": "chat.datamancy.net",
+            "policy": "APP",
+            "process": "element-web",
+            "network": "element-web",
+            "port": 8080,
+            "aliasOf": "element"
+          }
+        ]
+      },
+      {
+        "id": "forgejo",
+        "role": "selected",
+        "descriptorSha256": "0488048ab1655c92f27811ea46d71f409e71e48c123f66ee9d2615e1391c2f9f",
+        "runtimeSha256": "e8efe6bc3c8ce24cfd9cd7a08c45deb417c14d584f3b7731ca481b7359dc0c78",
+        "services": [
+          {
+            "id": "forgejo",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "postgres-ssd-bootstrap"
+            ],
+            "networks": [
+              "caddy",
+              "internet",
+              "postgres"
+            ],
+            "state": [
+              "forgejo_data",
+              "forgejo_runner_token"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "forgejo"
+        ],
+        "privateRoutes": [
+          {
+            "label": "forgejo",
+            "host": "forgejo.datamancy.net",
+            "policy": "APP",
+            "process": "forgejo",
+            "network": "forgejo-web",
+            "port": 3000,
+            "special": "forgejo"
+          }
+        ]
+      },
+      {
+        "id": "grafana",
+        "role": "selected",
+        "descriptorSha256": "8bae31fadb0e0972f051227a335fc2efc86b71b96d68ddc8ea8bc6e132214a9e",
+        "runtimeSha256": "787d0b664b258cf3338ab63f4d42365e3bc9e0c0c61d51c887228aff4a1ff567",
+        "services": [
+          {
+            "id": "grafana",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "postgres",
+              "postgres-ssd-bootstrap"
+            ],
+            "networks": [
+              "caddy",
+              "monitoring",
+              "postgres"
+            ],
+            "state": [
+              "grafana_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "grafana"
+        ],
+        "privateRoutes": [
+          {
+            "label": "grafana",
+            "host": "grafana.datamancy.net",
+            "policy": "GROUP",
+            "process": "grafana",
+            "network": "grafana-web",
+            "port": 3000,
+            "special": "grafana",
+            "groups": "admins|operators"
+          }
+        ]
+      },
+      {
+        "id": "homeassistant",
+        "role": "selected",
+        "descriptorSha256": "7f905fed123f6c8448f820cca7803dad50145607180a9e7d0ef605023dbe2c62",
+        "runtimeSha256": "9d5f50434e2d08679e6591133e6a33b00070ff8fd3a21eadd8f416796b748e1a",
+        "services": [
+          {
+            "id": "homeassistant",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "postgres"
+            ],
+            "networks": [
+              "caddy",
+              "internet",
+              "postgres"
+            ],
+            "state": [
+              "homeassistant_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "homeassistant"
+        ],
+        "privateRoutes": [
+          {
+            "label": "homeassistant",
+            "host": "home.datamancy.net",
+            "policy": "GROUP",
+            "process": "homeassistant",
+            "network": "home-web",
+            "port": 8123,
+            "special": "homeassistant",
+            "groups": "admins|operators|users"
+          },
+          {
+            "label": "home",
+            "host": "home.datamancy.net",
+            "policy": "GROUP",
+            "process": "homeassistant",
+            "network": "home-web",
+            "port": 8123,
+            "special": "homeassistant",
+            "aliasOf": "homeassistant",
+            "groups": "admins|operators|users"
+          },
+          {
+            "label": "home-native",
+            "host": "home-native.datamancy.net",
+            "policy": "NATIVE",
+            "process": "homeassistant",
+            "network": "home-web",
+            "port": 8123,
+            "special": "home-native"
+          }
+        ]
+      },
+      {
+        "id": "jellyfin",
+        "role": "selected",
+        "descriptorSha256": "41b83a152559483c3290f7fb03cdfc67ec9cc178ead46c80ae1d716b5991683c",
+        "runtimeSha256": "6211c31b1cdf071914e86c1190eca34bf2a6827ee83feb8ccfb13ba5649f5f8a",
+        "services": [
+          {
+            "id": "jellyfin",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": [
+              "caddy_ca",
+              "jellyfin_cache",
+              "jellyfin_config",
+              "jellyfin_media"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "jellyfin"
+        ],
+        "privateRoutes": [
+          {
+            "label": "jellyfin",
+            "host": "jellyfin.datamancy.net",
+            "policy": "APP",
+            "process": "jellyfin",
+            "network": "media-web",
+            "port": 8096,
+            "special": "jellyfin"
+          }
+        ]
+      },
+      {
+        "id": "jupyter-notebook",
+        "role": "selected",
+        "descriptorSha256": "ef2c436ee7c30d360061c0f34d31784fd69fe1368c560064d211a48e7fe30fde",
+        "runtimeSha256": "2a7d5eb314796756d0daced7e5b469f9ac811ff868e2407992b7b3d245a0798a",
+        "services": [
+          {
+            "id": "jupyter-notebook-build",
+            "lifecycle": "oneshot",
+            "dependsOn": [],
+            "networks": [],
+            "state": []
+          }
+        ],
+        "nativeDaemons": [
+          "notebook"
+        ]
+      },
+      {
+        "id": "jupyterhub",
+        "role": "selected",
+        "descriptorSha256": "70769e4d2b712a468b0c7c87b029cf13f3d60a4e576e7ed2379e8f07aabb66cf",
+        "runtimeSha256": "ee73801c807b4b13ee2ada70d59b5687cdc1f5ad9e0daa7093e95f21bf571a82",
+        "services": [
+          {
+            "id": "jupyterhub",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "jupyter-notebook-build",
+              "postgres-ssd-bootstrap",
+              "valkey"
+            ],
+            "networks": [
+              "ai",
+              "caddy",
+              "postgres"
+            ],
+            "state": [
+              "caddy_ca",
+              "jupyterhub_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "alice",
+          "bob",
+          "hub",
+          "hub-controller"
+        ],
+        "privateRoutes": [
+          {
+            "label": "jupyterhub",
+            "host": "notebooks.datamancy.net",
+            "policy": "GROUP",
+            "process": "hub",
+            "network": "hub-web",
+            "port": 8443,
+            "special": "jupyterhub",
+            "tlsName": "hub",
+            "caInput": "hub-ca.pem",
+            "groups": "admins|operators|developers"
+          }
+        ]
+      },
+      {
+        "id": "kopia",
+        "role": "selected",
+        "descriptorSha256": "82811fe45aaed8d3f3dec0cacffa618c7661bafe5d63249a463ad35ee2ee4bc5",
+        "runtimeSha256": "e18869b8f71987cac0bb1fb5674d29becc8ecc664fe20621e30d62444ec8933d",
+        "services": [
+          {
+            "id": "kopia",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy"
+            ],
+            "networks": [
+              "caddy",
+              "internet"
+            ],
+            "state": [
+              "kopia_data",
+              "mariadb_data",
+              "postgres_data"
+            ]
+          }
+        ],
+        "nativeControl": "kopia-generation-store",
+        "privateRoutes": [
+          {
+            "label": "kopia",
+            "host": "kopia.datamancy.net",
+            "policy": "FOLDED",
+            "special": "kopia"
+          }
+        ]
+      },
+      {
+        "id": "loki",
+        "role": "selected",
+        "descriptorSha256": "0592ccb1f22cae3c7ac5bfef4dbe83b50be701502cf27ccea5bf3d66182386b2",
+        "runtimeSha256": "03dc00687cecc15f94af8c1003c30f071648b0fa063442ce564407d700535ff6",
+        "services": [
+          {
+            "id": "loki",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "monitoring"
+            ],
+            "state": [
+              "loki_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "loki"
+        ]
+      },
+      {
+        "id": "mailserver",
+        "role": "selected",
+        "descriptorSha256": "a645302b80ee6f4e40a23a5ffa7ecb53eee5c992f397d3526e1fa060cb779bff",
+        "runtimeSha256": "84926a9511b73e1346dafd440328390263bc29416719e149c805710cbfa7f635",
+        "services": [
+          {
+            "id": "mailserver",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy"
+            ],
+            "networks": [
+              "caddy",
+              "mailserver"
+            ],
+            "state": [
+              "caddy_ca",
+              "mail_tls",
+              "mailserver_config",
+              "mailserver_data",
+              "mailserver_rspamd"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "mail"
+        ],
+        "privateRoutes": [
+          {
+            "label": "mail.datamancy.net",
+            "host": "mail.datamancy.net",
+            "policy": "CONTROL",
+            "special": "mail-tls"
+          }
+        ]
+      },
+      {
+        "id": "mariadb",
+        "role": "selected",
+        "descriptorSha256": "82afc5b3896afd02d40ceb546c6928f63c8fa87fc8536eaff31cd4cd9e8f0295",
+        "runtimeSha256": "40d6d3e21b89733edc9b19d394aaa3e3822dcbb445564d4b0bdbe8a20510aed6",
+        "services": [
+          {
+            "id": "mariadb",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "mariadb"
+            ],
+            "state": [
+              "mariadb_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "mariadb"
+        ]
+      },
+      {
+        "id": "memcached",
+        "role": "selected",
+        "descriptorSha256": "3f41fd2d3f292ce7f0e80b99b55f56dc4f24b6fc6d4d3cc1aeef9b17195f1cef",
+        "runtimeSha256": "55a4aa4598b680ca58e1bfc2fd48396073852af44b0c9b90c105ec332b041fae",
+        "services": [
+          {
+            "id": "memcached",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "memcached"
+            ],
+            "state": []
+          }
+        ],
+        "nativeDaemons": [
+          "memcached"
+        ]
+      },
+      {
+        "id": "node-exporter",
+        "role": "selected",
+        "descriptorSha256": "aec0ad8849bd1da3d16b1a678f414240a86cec535bbf3a7433f29adb0929a002",
+        "runtimeSha256": "ed530b2a543fc1d56a444dddc481b2b02016db74d0f1dfd4b682e9a8d77d945d",
+        "services": [
+          {
+            "id": "node-exporter",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "monitoring"
+            ],
+            "state": [
+              "node-exporter-stack-filesystem-view"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "node-exporter"
+        ]
+      },
+      {
+        "id": "ntfy",
+        "role": "selected",
+        "descriptorSha256": "ac04d12c92b64d5c1f1a72b77b07b7fc63091b7895840f5510c07cf93a9b32f9",
+        "runtimeSha256": "a4de79e4908c28ddc9cb857a11f9e9530dcc796de8d5515836ede692b84adc03",
+        "services": [
+          {
+            "id": "ntfy",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": [
+              "ntfy_data"
+            ]
+          },
+          {
+            "id": "ntfy-native-auth",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "keycloak-configure"
+            ],
+            "networks": [],
+            "state": [
+              "caddy_ca"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "ntfy"
+        ],
+        "privateRoutes": [
+          {
+            "label": "ntfy",
+            "host": "ntfy.datamancy.net",
+            "policy": "GROUP",
+            "process": "ntfy",
+            "network": "ntfy-web",
+            "port": 8080,
+            "special": "ntfy",
+            "groups": "admins|operators"
+          },
+          {
+            "label": "ntfy-native",
+            "host": "ntfy-native.datamancy.net",
+            "policy": "NATIVE",
+            "process": "ntfy",
+            "network": "ntfy-web",
+            "port": 8080,
+            "special": "ntfy-native"
+          }
+        ]
+      },
+      {
+        "id": "onlyoffice",
+        "role": "selected",
+        "descriptorSha256": "73b1647d7f122d213f6ff13ec74b3ba37a217ce5a051fa77cff35e6dc1e555b9",
+        "runtimeSha256": "c8852f457e75f95e5a18e48b77fb606678a2e098381fcb602f4f2586096a1c9d",
+        "services": [
+          {
+            "id": "onlyoffice",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": [
+              "caddy_ca",
+              "onlyoffice_document_data",
+              "onlyoffice_fonts",
+              "onlyoffice_lib",
+              "onlyoffice_postgresql"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "onlyoffice-docservice",
+          "onlyoffice-front"
+        ],
+        "privateRoutes": [
+          {
+            "label": "onlyoffice",
+            "host": "office.datamancy.net",
+            "policy": "APP",
+            "process": "onlyoffice-front",
+            "network": "onlyoffice-web",
+            "port": 8443,
+            "special": "onlyoffice",
+            "tlsName": "onlyoffice-front",
+            "caInput": "onlyoffice-ca.pem"
+          }
+        ]
+      },
+      {
+        "id": "opensearch",
+        "role": "selected",
+        "descriptorSha256": "276780815cd1bd99cca6125b32bd9a0bc126d38c1e60858a8da18a89d2208efa",
+        "runtimeSha256": "65b2019fcb0ca3518748e582bb449c5e76fef53314cdcc2e4182698b8029b3ac",
+        "services": [
+          {
+            "id": "opensearch",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "volume-init"
+            ],
+            "networks": [
+              "caddy",
+              "opensearch"
+            ],
+            "state": [
+              "opensearch_bind_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "opensearch"
+        ],
+        "privateRoutes": [
+          {
+            "label": "search.datamancy.net",
+            "host": "search.datamancy.net",
+            "policy": "GROUP",
+            "special": "search",
+            "process": "opensearch",
+            "network": "opensearch-web",
+            "port": 9200,
+            "groups": "admins|operators|agents",
+            "tlsName": "opensearch",
+            "caInput": "opensearch-ca.pem"
+          }
+        ]
+      },
+      {
+        "id": "planka",
+        "role": "selected",
+        "descriptorSha256": "9b46d771331815aa8d88a00fc05a5b3df878941f4929ee9a232cfdcaf089da39",
+        "runtimeSha256": "7b2eae37edd168f5ceca22540f4229d4ce385d45a6c006ddfd2f13c6e2887ea5",
+        "services": [
+          {
+            "id": "planka",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "postgres"
+            ],
+            "networks": [
+              "caddy",
+              "postgres"
+            ],
+            "state": [
+              "planka_attachments",
+              "planka_backgrounds",
+              "planka_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "planka"
+        ],
+        "privateRoutes": [
+          {
+            "label": "planka",
+            "host": "planka.datamancy.net",
+            "policy": "APP",
+            "process": "planka",
+            "network": "planka-web",
+            "port": 1337
+          }
+        ]
+      },
+      {
+        "id": "postgres",
+        "role": "selected",
+        "descriptorSha256": "6554a305bb05ace33f4438590b32238994e6c97a31842018f9a9729066f17b8e",
+        "runtimeSha256": "6d9994d99757ff63219aebd0c98107e3b25a729b69813d044e02c0054cc78659",
+        "services": [
+          {
+            "id": "postgres",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "postgres"
+            ],
+            "state": [
+              "postgres_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "postgres"
+        ]
+      },
+      {
+        "id": "prometheus",
+        "role": "selected",
+        "descriptorSha256": "cfbd1a53d570c449cd25581d980e726055c9a3fea42df7b2c7722ca772ba671e",
+        "runtimeSha256": "90f9f54c5e827269999bc1ca72b69f12c3643da04076085a179c6b6741623fde",
+        "services": [
+          {
+            "id": "market-data-exporter",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "internet",
+              "monitoring"
+            ],
+            "state": []
+          },
+          {
+            "id": "prometheus",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "market-data-exporter"
+            ],
+            "networks": [
+              "monitoring"
+            ],
+            "state": [
+              "prometheus_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "prometheus"
+        ],
+        "privateRoutes": [
+          {
+            "label": "prometheus",
+            "host": "prometheus.datamancy.net",
+            "policy": "GROUP",
+            "process": "prometheus",
+            "network": "prometheus-web",
+            "port": 9090,
+            "groups": "admins|operators"
+          }
+        ]
+      },
+      {
+        "id": "qbittorrent",
+        "role": "selected",
+        "descriptorSha256": "2f9ef6c3fbf10b7845cebde7fee0d6aa06e3300426e31f0fadf8a55e426d8b1d",
+        "runtimeSha256": "61294a959f53c6df484d6ed02095c484bbcda7b6982c85020ca1dc2d8ddfab58",
+        "services": [
+          {
+            "id": "qbittorrent",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "volume-init"
+            ],
+            "networks": [
+              "caddy",
+              "internet"
+            ],
+            "state": [
+              "qbittorrent_config",
+              "qbittorrent_data"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "qbittorrent"
+        ],
+        "privateRoutes": [
+          {
+            "label": "qbittorrent",
+            "host": "qbittorrent.datamancy.net",
+            "policy": "AUTH",
+            "process": "qbittorrent",
+            "network": "transfer-web",
+            "port": 8080,
+            "special": "qbittorrent"
+          },
+          {
+            "label": "qbittorrent-native",
+            "host": "qbittorrent-native.datamancy.net",
+            "policy": "NATIVE",
+            "process": "qbittorrent",
+            "network": "transfer-web",
+            "port": 8080,
+            "special": "qbittorrent-native"
+          }
+        ]
+      },
+      {
+        "id": "seafile",
+        "role": "selected",
+        "descriptorSha256": "a767ab17ab12ae2e96dcd2736e14c46702cf154fd923a1e3a43bdfb1871a95c0",
+        "runtimeSha256": "f992a019c789d51588de672e9900a47df9fbfd9c7460f4096faf156d1643ae42",
+        "services": [
+          {
+            "id": "seafile",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "mariadb",
+              "valkey",
+              "volume-init"
+            ],
+            "networks": [
+              "caddy",
+              "mariadb",
+              "valkey"
+            ],
+            "state": [
+              "seafile_files"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "seafile-server",
+          "seafile-backend",
+          "seafile-files"
+        ],
+        "privateRoutes": [
+          {
+            "label": "seafile",
+            "host": "files.datamancy.net",
+            "policy": "GROUP",
+            "process": "seafile-files",
+            "network": "seafile-web",
+            "port": 8443,
+            "special": "seafile",
+            "tlsName": "seafile-files",
+            "caInput": "seafile-ca.pem",
+            "groups": "admins|operators|users"
+          },
+          {
+            "label": "files",
+            "host": "files.datamancy.net",
+            "policy": "GROUP",
+            "process": "seafile-files",
+            "network": "seafile-web",
+            "port": 8443,
+            "special": "seafile",
+            "tlsName": "seafile-files",
+            "caInput": "seafile-ca.pem",
+            "aliasOf": "seafile",
+            "groups": "admins|operators|users"
+          },
+          {
+            "label": "files-native",
+            "host": "files-native.datamancy.net",
+            "policy": "NATIVE",
+            "process": "seafile-files",
+            "network": "seafile-web",
+            "port": 8443,
+            "special": "seafile-native",
+            "tlsName": "seafile-files",
+            "caInput": "seafile-ca.pem"
+          }
+        ]
+      },
+      {
+        "id": "searxng",
+        "role": "selected",
+        "descriptorSha256": "5c91f5aa3aba0d743610dee01a8f0b60387621fff40531c64def54523b4625cc",
+        "runtimeSha256": "8f40d835e3414aa965876887b0d18f15b06df7f1991fe96f742525af12d1ba13",
+        "services": [
+          {
+            "id": "searxng",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": [
+              "searxng_cache"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "searxng",
+          "searxng-web"
+        ],
+        "privateRoutes": [
+          {
+            "label": "websearch",
+            "host": "websearch.datamancy.net",
+            "policy": "GROUP",
+            "process": "searxng-web",
+            "network": "search-web",
+            "port": 8080,
+            "special": "websearch",
+            "groups": "admins|operators|agents"
+          }
+        ]
+      },
+      {
+        "id": "sogo",
+        "role": "selected",
+        "descriptorSha256": "31a7af26bf7e313d1716e98ccd64b130d8ba6879facdc81f177bbe8312f840a1",
+        "runtimeSha256": "1e69f8d90f513c01fa76b7d47af6badf8699bfb970deb13266545d3f43f5379b",
+        "services": [
+          {
+            "id": "sogo",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "keycloak",
+              "keycloak-configure",
+              "mailserver",
+              "mariadb",
+              "memcached"
+            ],
+            "networks": [
+              "caddy",
+              "mailserver",
+              "mariadb",
+              "memcached"
+            ],
+            "state": [
+              "sogo_owner_state",
+              "sogo_spool"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "sogod",
+          "groupware"
+        ],
+        "privateRoutes": [
+          {
+            "label": "sogo",
+            "host": "groupware.datamancy.net",
+            "policy": "APP",
+            "process": "groupware",
+            "network": "sogo-web",
+            "port": 8443,
+            "special": "sogo",
+            "tlsName": "groupware",
+            "caInput": "sogo-ca.pem"
+          }
+        ]
+      },
+      {
+        "id": "valkey",
+        "role": "selected",
+        "descriptorSha256": "0a17b36ac0f30b09fa91eb04065b7799af62b12feb235d81b21a3ca9f3c47024",
+        "runtimeSha256": "9aec8718a580b08cf2e2e400e427af173679e335e5973d8cbe7ade7d89e48c44",
+        "services": [
+          {
+            "id": "valkey",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "valkey"
+            ],
+            "state": [
+              "redis_data",
+              "valkey_acl"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "valkey"
+        ]
+      },
+      {
+        "id": "erpnext",
+        "role": "selected",
+        "descriptorSha256": "6230a67dc66ddf0a47dc1b8740122b6250c6b5048c3bc45c07464507c9626ca2",
+        "runtimeSha256": "93945a896897bf13d9e14ff419ce68f408c34ef5ffd8489f2e95e5443f3537bb",
+        "services": [
+          {
+            "id": "erpnext-configurator",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "mariadb",
+              "valkey"
+            ],
+            "networks": [
+              "erpnext-internal",
+              "mariadb",
+              "valkey"
+            ],
+            "state": [
+              "erpnext_logs",
+              "erpnext_sites"
+            ]
+          },
+          {
+            "id": "erpnext-bootstrap",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "erpnext-configurator",
+              "mariadb",
+              "valkey"
+            ],
+            "networks": [
+              "caddy",
+              "erpnext-internal",
+              "mariadb",
+              "valkey"
+            ],
+            "state": [
+              "caddy_ca",
+              "erpnext_logs",
+              "erpnext_sites"
+            ]
+          },
+          {
+            "id": "erpnext-backend",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "erpnext-bootstrap",
+              "mariadb",
+              "valkey"
+            ],
+            "networks": [
+              "caddy",
+              "erpnext-internal",
+              "mariadb",
+              "valkey"
+            ],
+            "state": [
+              "caddy_ca",
+              "erpnext_logs",
+              "erpnext_sites"
+            ]
+          },
+          {
+            "id": "erpnext-websocket",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "erpnext-bootstrap",
+              "valkey"
+            ],
+            "networks": [
+              "erpnext-internal",
+              "valkey"
+            ],
+            "state": [
+              "erpnext_logs",
+              "erpnext_sites"
+            ]
+          },
+          {
+            "id": "erpnext-queue-short",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "erpnext-bootstrap",
+              "mariadb",
+              "valkey"
+            ],
+            "networks": [
+              "erpnext-internal",
+              "mariadb",
+              "valkey"
+            ],
+            "state": [
+              "erpnext_logs",
+              "erpnext_sites"
+            ]
+          },
+          {
+            "id": "erpnext-queue-long",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "erpnext-bootstrap",
+              "mariadb",
+              "valkey"
+            ],
+            "networks": [
+              "erpnext-internal",
+              "mariadb",
+              "valkey"
+            ],
+            "state": [
+              "erpnext_logs",
+              "erpnext_sites"
+            ]
+          },
+          {
+            "id": "erpnext-scheduler",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "erpnext-bootstrap",
+              "mariadb",
+              "valkey"
+            ],
+            "networks": [
+              "erpnext-internal",
+              "mariadb",
+              "valkey"
+            ],
+            "state": [
+              "erpnext_logs",
+              "erpnext_sites"
+            ]
+          },
+          {
+            "id": "erpnext",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "erpnext-backend",
+              "erpnext-bootstrap",
+              "erpnext-websocket"
+            ],
+            "networks": [
+              "caddy",
+              "erpnext-internal"
+            ],
+            "state": [
+              "erpnext_logs",
+              "erpnext_sites"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "erp-redis-bridge",
+          "backend",
+          "websocket",
+          "worker",
+          "scheduler",
+          "erp"
+        ],
+        "privateRoutes": [
+          {
+            "label": "erpnext",
+            "host": "erp.datamancy.net",
+            "policy": "GROUP",
+            "process": "erp",
+            "network": "erp-web",
+            "port": 8443,
+            "special": "erpnext",
+            "tlsName": "erp",
+            "caInput": "erp-ca.pem",
+            "groups": "admins|operators"
+          }
+        ]
+      },
+      {
+        "id": "firefly-iii",
+        "role": "selected",
+        "descriptorSha256": "fa1039d543990fd5ff5b54472db4d4be9d4cb152c0a1f7e14353ee0fa15dee7d",
+        "runtimeSha256": "0a5ee8c35ddd4662d13e9ca46c8499a4c0e7bfd520b164745f5083683e20f0b6",
+        "services": [
+          {
+            "id": "firefly-identity-check",
+            "lifecycle": "oneshot",
+            "dependsOn": [
+              "caddy",
+              "keycloak-configure"
+            ],
+            "networks": [
+              "firefly-private"
+            ],
+            "state": [
+              "caddy_ca"
+            ]
+          },
+          {
+            "id": "firefly",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "firefly-identity-check",
+              "mailserver",
+              "postgres"
+            ],
+            "networks": [
+              "firefly-private"
+            ],
+            "state": [
+              "caddy_ca",
+              "firefly_state"
+            ]
+          },
+          {
+            "id": "firefly-sso",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "firefly",
+              "keycloak-configure"
+            ],
+            "networks": [
+              "firefly-private"
+            ],
+            "state": [
+              "caddy_ca"
+            ]
+          },
+          {
+            "id": "firefly-native-api",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "firefly"
+            ],
+            "networks": [
+              "firefly-private"
+            ],
+            "state": []
+          },
+          {
+            "id": "firefly-cron",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "firefly"
+            ],
+            "networks": [
+              "firefly-private"
+            ],
+            "state": [
+              "caddy_ca",
+              "firefly_state"
+            ]
+          },
+          {
+            "id": "firefly-importer",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "firefly"
+            ],
+            "networks": [
+              "firefly-importer-private"
+            ],
+            "state": [
+              "caddy_ca",
+              "firefly_importer_state"
+            ]
+          },
+          {
+            "id": "firefly-importer-sso",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "firefly-importer",
+              "keycloak-configure"
+            ],
+            "networks": [
+              "firefly-importer-private"
+            ],
+            "state": [
+              "caddy_ca"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "firefly-php",
+          "firefly",
+          "firefly-native-api",
+          "firefly-sso",
+          "firefly-importer",
+          "firefly-importer-sso"
+        ],
+        "privateRoutes": [
+          {
+            "label": "firefly",
+            "host": "firefly.datamancy.net",
+            "policy": "APP",
+            "process": "firefly-sso",
+            "network": "firefly-web",
+            "port": 4180,
+            "special": "finance"
+          },
+          {
+            "label": "firefly-importer",
+            "host": "firefly-importer.datamancy.net",
+            "policy": "APP",
+            "process": "firefly-importer-sso",
+            "network": "firefly-importer-web",
+            "port": 4180,
+            "special": "finance-importer"
+          }
+        ]
+      },
+      {
+        "id": "huly",
+        "role": "selected",
+        "descriptorSha256": "e612474fe129bb24cacfafd66a82a753a1861bc45828ac6a3c573e0dbb4f6b17",
+        "runtimeSha256": "4caa02dddcc70db2033a8496e4e84447616e6e4e133a7daf84510f48b25e7210",
+        "services": [
+          {
+            "id": "huly-cockroach",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "caddy"
+            ],
+            "state": [
+              "huly_cockroach"
+            ]
+          },
+          {
+            "id": "huly-redpanda",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "caddy"
+            ],
+            "state": [
+              "huly_redpanda"
+            ]
+          },
+          {
+            "id": "huly-minio",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "caddy"
+            ],
+            "state": [
+              "huly_minio"
+            ]
+          },
+          {
+            "id": "huly-elastic",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "caddy"
+            ],
+            "state": [
+              "huly_elastic"
+            ]
+          },
+          {
+            "id": "huly-rekoni",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "caddy"
+            ],
+            "state": []
+          },
+          {
+            "id": "huly-stats",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "caddy"
+            ],
+            "state": []
+          },
+          {
+            "id": "huly-transactor",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "huly-cockroach",
+              "huly-elastic",
+              "huly-minio",
+              "huly-redpanda"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": []
+          },
+          {
+            "id": "huly-collaborator",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "caddy"
+            ],
+            "state": []
+          },
+          {
+            "id": "huly-account",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "huly-cockroach",
+              "huly-redpanda"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": []
+          },
+          {
+            "id": "huly-workspace",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "huly-cockroach",
+              "huly-redpanda"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": []
+          },
+          {
+            "id": "huly-front",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "huly-account",
+              "huly-fulltext",
+              "huly-transactor"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": []
+          },
+          {
+            "id": "huly-fulltext",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "huly-cockroach",
+              "huly-elastic"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": []
+          },
+          {
+            "id": "huly-kvs",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "huly-cockroach"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": []
+          }
+        ],
+        "nativeDaemons": [
+          "huly-cockroach",
+          "huly-elastic",
+          "huly-objects",
+          "huly-redpanda",
+          "huly-stats",
+          "huly-account",
+          "huly-workspace",
+          "huly-transactor",
+          "huly-collaborator",
+          "huly-rekoni",
+          "huly-fulltext",
+          "huly-front",
+          "huly-kvs",
+          "huly"
+        ],
+        "privateRoutes": [
+          {
+            "label": "huly",
+            "host": "work.datamancy.net",
+            "policy": "GROUP",
+            "process": "huly",
+            "network": "huly-web",
+            "port": 8443,
+            "special": "huly",
+            "tlsName": "huly",
+            "caInput": "huly-ca.pem",
+            "groups": "admins|operators|developers"
+          }
+        ]
+      },
+      {
+        "id": "keycloak",
+        "role": "selected",
+        "descriptorSha256": "25ac652dedfac4177854e8247cce3333a4c780503a95e3b7858df486750bc674",
+        "runtimeSha256": "445ba10c233eb36cb8446390cbc52c5f4d5a8d58ff877f5f3d5cc1fc57c05261",
+        "services": [
+          {
+            "id": "keycloak-bootstrap",
+            "lifecycle": "oneshot",
+            "dependsOn": [
+              "postgres"
+            ],
+            "networks": [
+              "postgres"
+            ],
+            "state": []
+          },
+          {
+            "id": "keycloak",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "keycloak-bootstrap"
+            ],
+            "networks": [
+              "caddy",
+              "postgres"
+            ],
+            "state": []
+          }
+        ],
+        "nativeDaemons": [
+          "keycloak"
+        ],
+        "privateRoutes": [
+          {
+            "label": "keycloak",
+            "host": "auth.datamancy.net",
+            "policy": "OPEN",
+            "process": "keycloak",
+            "network": "identity-web",
+            "port": 8443,
+            "special": "identity",
+            "tlsName": "keycloak",
+            "caInput": "identity-ca.pem"
+          }
+        ]
+      },
+      {
+        "id": "livekit",
+        "role": "selected",
+        "descriptorSha256": "b2a7c09b6b36bd7718f5c3454455d5953adb19395ffd403a3450921c7e785e2c",
+        "runtimeSha256": "71b0e126633c0e9cd5af7975c7af1c5094f34d8b49095c576bba125547a746e3",
+        "services": [
+          {
+            "id": "livekit",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "caddy",
+              "matrix-internal"
+            ],
+            "state": []
+          },
+          {
+            "id": "matrix-rtc-auth",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "livekit",
+              "synapse"
+            ],
+            "networks": [
+              "caddy",
+              "matrix-internal"
+            ],
+            "state": [
+              "caddy_ca"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "livekit",
+          "rtc-authorizer",
+          "rtc-web"
+        ],
+        "privateRoutes": [
+          {
+            "label": "matrix-rtc",
+            "host": "matrix-rtc.datamancy.net",
+            "policy": "NATIVE",
+            "process": "rtc-web",
+            "network": "rtc-web",
+            "port": 8080,
+            "special": "matrix-rtc"
+          }
+        ]
+      },
+      {
+        "id": "mastodon",
+        "role": "selected",
+        "descriptorSha256": "3d16f423b5abaa4641278f9d03371224fa2c6802631558931ea67bb03b57d163",
+        "runtimeSha256": "2a24087924d531d6b723404c79d574d9c852eb4b3d4772141aea519a9acc10d2",
+        "services": [
+          {
+            "id": "mastodon-storage-init",
+            "lifecycle": "oneshot",
+            "dependsOn": [],
+            "networks": [],
+            "state": [
+              "mastodon_public_system"
+            ]
+          },
+          {
+            "id": "mastodon-init",
+            "lifecycle": "oneshot",
+            "dependsOn": [
+              "mastodon-storage-init",
+              "postgres-ssd-bootstrap",
+              "valkey"
+            ],
+            "networks": [
+              "internet",
+              "postgres",
+              "valkey"
+            ],
+            "state": []
+          },
+          {
+            "id": "mastodon-web",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "mastodon-init",
+              "mastodon-storage-init",
+              "postgres-ssd-bootstrap",
+              "valkey"
+            ],
+            "networks": [
+              "caddy",
+              "internet",
+              "mastodon-internal",
+              "postgres",
+              "valkey"
+            ],
+            "state": [
+              "caddy_ca",
+              "mastodon_public_system"
+            ]
+          },
+          {
+            "id": "mastodon-streaming",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "mastodon-init",
+              "mastodon-storage-init",
+              "postgres-ssd-bootstrap",
+              "valkey"
+            ],
+            "networks": [
+              "mastodon-internal",
+              "postgres",
+              "valkey"
+            ],
+            "state": []
+          },
+          {
+            "id": "mastodon-sidekiq",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "mastodon-init",
+              "mastodon-storage-init",
+              "postgres-ssd-bootstrap",
+              "valkey"
+            ],
+            "networks": [
+              "internet",
+              "mastodon-internal",
+              "postgres",
+              "valkey"
+            ],
+            "state": [
+              "caddy_ca",
+              "mastodon_public_system"
+            ]
+          },
+          {
+            "id": "mastodon-recommendation-seeder",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "mastodon-init",
+              "mastodon-storage-init",
+              "postgres-ssd-bootstrap",
+              "valkey"
+            ],
+            "networks": [
+              "internet",
+              "mastodon-internal",
+              "postgres",
+              "valkey"
+            ],
+            "state": [
+              "caddy_ca",
+              "mastodon_public_system"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "mastodon",
+          "sidekiq",
+          "streaming",
+          "social",
+          "mastodon-redis-bridge"
+        ],
+        "privateRoutes": [
+          {
+            "label": "mastodon",
+            "host": "social.datamancy.net",
+            "policy": "APP",
+            "process": "social",
+            "network": "mastodon-web",
+            "port": 8443,
+            "special": "social",
+            "tlsName": "social",
+            "caInput": "mastodon-ca.pem"
+          },
+          {
+            "label": "social",
+            "host": "social.datamancy.net",
+            "policy": "APP",
+            "process": "social",
+            "network": "mastodon-web",
+            "port": 8443,
+            "special": "social",
+            "tlsName": "social",
+            "caInput": "mastodon-ca.pem",
+            "aliasOf": "mastodon"
+          }
+        ]
+      },
+      {
+        "id": "mastodon-rss-publisher",
+        "role": "selected",
+        "descriptorSha256": "e68aee882e60abbcb913e19241a8512856716a6dacd3b63c317f19823245c012",
+        "runtimeSha256": "d644da95dbe28dd28148ed95532c49f01640cfd62173357b8fb8f3ceb1678c4d",
+        "services": [
+          {
+            "id": "mastodon-rss-state-init",
+            "lifecycle": "oneshot",
+            "dependsOn": [],
+            "networks": [],
+            "state": [
+              "mastodon_rss_publisher_state"
+            ]
+          },
+          {
+            "id": "mastodon-rss-account-bootstrap",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "mastodon-init",
+              "mastodon-rss-state-init",
+              "postgres-ssd-bootstrap",
+              "valkey"
+            ],
+            "networks": [
+              "internet",
+              "mastodon-internal",
+              "postgres",
+              "valkey"
+            ],
+            "state": [
+              "mastodon_public_system",
+              "mastodon_rss_publisher_state"
+            ]
+          },
+          {
+            "id": "mastodon-rss-publisher",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "mastodon-rss-account-bootstrap"
+            ],
+            "networks": [
+              "internet",
+              "mastodon-internal"
+            ],
+            "state": [
+              "mastodon_rss_publisher_state"
+            ]
+          }
+        ],
+        "nativeControl": "rss-scheduled-controller"
+      },
+      {
+        "id": "matrix-authentication-service",
+        "role": "selected",
+        "descriptorSha256": "744e9c2c6a40c3cc021a8b2924663f005fc4b16da29df546674c00cdb2e80caa",
+        "runtimeSha256": "66284bc9dac92c92875f81ee9e37ad32502fc45f2a9418261ca4aca4eff9ee1f",
+        "services": [
+          {
+            "id": "matrix-authentication-service-db",
+            "lifecycle": "oneshot",
+            "dependsOn": [
+              "postgres"
+            ],
+            "networks": [
+              "postgres"
+            ],
+            "state": []
+          },
+          {
+            "id": "matrix-authentication-service-keys",
+            "lifecycle": "oneshot",
+            "dependsOn": [],
+            "networks": [],
+            "state": [
+              "matrix_authentication_service_keys"
+            ]
+          },
+          {
+            "id": "matrix-authentication-service",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "keycloak-configure",
+              "matrix-authentication-service-db",
+              "matrix-authentication-service-keys",
+              "postgres",
+              "synapse"
+            ],
+            "networks": [
+              "caddy",
+              "internet",
+              "matrix-internal",
+              "postgres"
+            ],
+            "state": [
+              "caddy_ca",
+              "matrix_authentication_service_keys"
+            ]
+          }
+        ],
+        "nativeDaemons": [
+          "mas"
+        ],
+        "privateRoutes": [
+          {
+            "label": "matrix-auth",
+            "host": "matrix-auth.datamancy.net",
+            "policy": "APP",
+            "process": "mas",
+            "network": "mas-web",
+            "port": 8080
+          }
+        ]
+      },
+      {
+        "id": "synapse",
+        "role": "selected",
+        "descriptorSha256": "5f79f602dd36e5ef0e3e2ef7f40b6990e2ad0c764a0cb6175ccc588c96597127",
+        "runtimeSha256": "587f3717ef3ff938c4e9c98773b579e0ab2dc749535388c64e2164496a4d2c78",
+        "services": [
+          {
+            "id": "synapse-permissions",
+            "lifecycle": "oneshot",
+            "dependsOn": [],
+            "networks": [],
+            "state": [
+              "synapse_data"
+            ]
+          },
+          {
+            "id": "synapse",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "postgres",
+              "synapse-permissions",
+              "valkey"
+            ],
+            "networks": [
+              "caddy",
+              "internet",
+              "matrix-internal",
+              "postgres",
+              "valkey"
+            ],
+            "state": [
+              "synapse_data"
+            ]
+          },
+          {
+            "id": "synapse-room-bootstrap",
+            "lifecycle": "oneshot",
+            "dependsOn": [
+              "matrix-authentication-service",
+              "postgres",
+              "synapse"
+            ],
+            "networks": [
+              "matrix-internal",
+              "postgres"
+            ],
+            "state": []
+          }
+        ],
+        "nativeDaemons": [
+          "synapse"
+        ],
+        "privateRoutes": [
+          {
+            "label": "matrix",
+            "host": "matrix.datamancy.net",
+            "policy": "NATIVE",
+            "process": "synapse",
+            "network": "synapse-web",
+            "port": 8008,
+            "special": "matrix"
+          },
+          {
+            "label": "api.matrix",
+            "host": "api.matrix.datamancy.net",
+            "policy": "NATIVE",
+            "process": "synapse",
+            "network": "synapse-web",
+            "port": 8008,
+            "special": "matrix-api"
+          }
+        ]
+      },
+      {
+        "id": "forgejo-runner",
+        "role": "historical-support",
+        "descriptorSha256": "21c91349e9b89b3fcaa9f5c6e5605593face135b32ad1d2f4d3177fb868c3d4f",
+        "runtimeSha256": "01d5ab5fd753b8d506dc99328ab2c1dac07de069fbdadfed1a01d18717e81938",
+        "services": [
+          {
+            "id": "forgejo-runner",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "forgejo"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": [
+              "forgejo_runner_data",
+              "forgejo_runner_token"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "keycloak-auth-gateway",
+        "role": "historical-support",
+        "descriptorSha256": "bc90664ce194eeb51ecdf1859cb42e7e27603bbbcaacba335f57680eef6a8c77",
+        "runtimeSha256": "d38afc14334e8eeacffdcc30a4b5824ec75077e20a1c5707e122b72a02d46c12",
+        "services": [
+          {
+            "id": "keycloak-configure",
+            "lifecycle": "oneshot",
+            "dependsOn": [
+              "keycloak"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": []
+          },
+          {
+            "id": "keycloak-auth-gateway",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy",
+              "keycloak-configure",
+              "valkey"
+            ],
+            "networks": [
+              "caddy",
+              "valkey"
+            ],
+            "state": []
+          }
+        ],
+        "privateRoutes": [
+          {
+            "label": "keycloak-auth",
+            "host": "keycloak-auth.datamancy.net",
+            "policy": "CONTROL",
+            "process": "auth-gateway",
+            "network": "auth-gateway-web",
+            "port": 4180,
+            "special": "auth-gateway"
+          }
+        ]
+      },
+      {
+        "id": "legal-research-mcp",
+        "role": "historical-support",
+        "descriptorSha256": "43d8845168c0de44845c5e9b4f097f4a43708c2f3366955a55df6d6d4be642b5",
+        "runtimeSha256": "c3fde17a3082070ae7dbcb167118b87b0a265405528c2c435dba7bd8d80eda16",
+        "services": [
+          {
+            "id": "legal-research-db-bootstrap",
+            "lifecycle": "oneshot",
+            "dependsOn": [
+              "postgres-ssd-bootstrap"
+            ],
+            "networks": [
+              "postgres"
+            ],
+            "state": []
+          },
+          {
+            "id": "legal-research-mcp",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "keycloak",
+              "legal-research-db-bootstrap",
+              "opensearch",
+              "postgres-ssd-bootstrap"
+            ],
+            "networks": [
+              "caddy",
+              "opensearch",
+              "postgres"
+            ],
+            "state": [
+              "australian_legislation_data"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "onboarding",
+        "role": "historical-support",
+        "descriptorSha256": "40ca307b6650e037c33258fdfb37a2c2f87830398dc292ed4df97f9056625863",
+        "runtimeSha256": "1a346d15fd8042af2485b2125c589c4349694362dd899aa6eff61c514e8ea3b0",
+        "services": [
+          {
+            "id": "onboarding",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "caddy"
+            ],
+            "state": [
+              "onboarding_data"
+            ]
+          }
+        ],
+        "privateRoutes": [
+          {
+            "label": "onboarding",
+            "host": "onboarding.datamancy.net",
+            "policy": "CONTROL",
+            "special": "onboarding"
+          }
+        ]
+      },
+      {
+        "id": "portal",
+        "role": "historical-support",
+        "descriptorSha256": "2eea8d4a9a2fd8ffa76adfbf097a39c78ac12e7ec9d7448f96d725460db1d03c",
+        "runtimeSha256": "7fa7c373df9cfa73b3785108868ff2bd6ed0de40b9b43765f979801eddb03de4",
+        "services": [
+          {
+            "id": "portal",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "caddy"
+            ],
+            "networks": [
+              "caddy"
+            ],
+            "state": []
+          }
+        ],
+        "privateRoutes": [
+          {
+            "label": "portal.datamancy.net",
+            "host": "portal.datamancy.net",
+            "policy": "GROUP",
+            "special": "portal",
+            "process": "portal",
+            "network": "portal-web",
+            "port": 3000,
+            "groups": "admins|operators|users"
+          },
+          {
+            "label": "datamancy.net",
+            "host": "datamancy.net",
+            "policy": "GROUP",
+            "special": "portal-apex",
+            "process": "portal",
+            "network": "portal-web",
+            "port": 3000,
+            "groups": "admins|operators|users"
+          },
+          {
+            "label": "homepage.datamancy.net",
+            "host": "homepage.datamancy.net",
+            "policy": "REDIRECT",
+            "special": "portal-redirect"
+          }
+        ]
+      },
+      {
+        "id": "postgres-ssd",
+        "role": "historical-support",
+        "descriptorSha256": "eae3b944386506ad82f2b97a988f0591aa5cf798207eed18eaa18daf42071891",
+        "runtimeSha256": "d6c13b4f2191271811f920ce89093c0734cfcb7d2ccd7fe367e7d1a4692ba030",
+        "services": [
+          {
+            "id": "postgres-ssd",
+            "lifecycle": "daemon",
+            "dependsOn": [],
+            "networks": [
+              "postgres"
+            ],
+            "state": [
+              "postgres_ssd_data"
+            ]
+          },
+          {
+            "id": "postgres-ssd-bootstrap",
+            "lifecycle": "daemon",
+            "dependsOn": [
+              "postgres-ssd"
+            ],
+            "networks": [
+              "postgres"
+            ],
+            "state": []
+          }
+        ]
+      },
+      {
+        "id": "stack-foundation",
+        "role": "historical-support",
+        "descriptorSha256": "47244b2445cc2b56ac91d5ca950d9ad7fa4920c2d64839581d7a3aa80337d548",
+        "runtimeSha256": "4d58849776e4b3edc8b119769b809f0221b3d6376fe86deb10cce943d1768cb2",
+        "services": [
+          {
+            "id": "volume-init",
+            "lifecycle": "oneshot",
+            "dependsOn": [],
+            "networks": [],
+            "state": []
+          }
+        ]
+      },
+      {
+        "id": "test-runners",
+        "role": "historical-support",
+        "descriptorSha256": "4cb3d02af25f84bb50724344caa4198cdecf37aa9d1aa7285453302a8296089d",
+        "runtimeSha256": "3ed3a40859240c48bbe72852b4cf8a404142d55c14a68c2305941612636e132d",
+        "services": [
+          {
+            "id": "android-test-runner-api36",
+            "lifecycle": "on-demand",
+            "dependsOn": [],
+            "networks": [
+              "default"
+            ],
+            "state": []
+          },
+          {
+            "id": "android-test-runner-api34",
+            "lifecycle": "on-demand",
+            "dependsOn": [],
+            "networks": [
+              "default"
+            ],
+            "state": []
+          },
+          {
+            "id": "test-runner",
+            "lifecycle": "on-demand",
+            "dependsOn": [
+              "postgres-ssd-bootstrap"
+            ],
+            "networks": [
+              "ai",
+              "caddy",
+              "default",
+              "internet",
+              "mailserver",
+              "mariadb",
+              "mastodon-internal",
+              "matrix-internal",
+              "memcached",
+              "monitoring",
+              "opensearch",
+              "pipeline",
+              "postgres",
+              "qdrant",
+              "valkey"
+            ],
+            "state": []
+          },
+          {
+            "id": "test-runner-managed",
+            "lifecycle": "on-demand",
+            "dependsOn": [
+              "postgres-ssd-bootstrap"
+            ],
+            "networks": [
+              "ai",
+              "caddy",
+              "default",
+              "internet",
+              "mailserver",
+              "mariadb",
+              "mastodon-internal",
+              "matrix-internal",
+              "memcached",
+              "monitoring",
+              "opensearch",
+              "pipeline",
+              "postgres",
+              "qdrant",
+              "valkey"
+            ],
+            "state": []
+          }
+        ]
+      }
+    ],
+    "routes": [
+      {
+        "label": "keycloak",
+        "upstreams": [
+          "keycloak"
+        ]
+      },
+      {
+        "label": "keycloak-auth",
+        "upstreams": [
+          "keycloak-auth-gateway"
+        ]
+      },
+      {
+        "label": "onboarding",
+        "upstreams": [
+          "onboarding"
+        ]
+      },
+      {
+        "label": "kopia",
+        "upstreams": [
+          "kopia"
+        ]
+      },
+      {
+        "label": "prometheus",
+        "upstreams": [
+          "prometheus"
+        ]
+      },
+      {
+        "label": "alerts",
+        "upstreams": [
+          "alertmanager"
+        ]
+      },
+      {
+        "label": "grafana",
+        "upstreams": [
+          "grafana"
+        ]
+      },
+      {
+        "label": "planka",
+        "upstreams": [
+          "planka"
+        ]
+      },
+      {
+        "label": "huly",
+        "upstreams": [
+          "huly-account",
+          "huly-front"
+        ]
+      },
+      {
+        "label": "bookstack",
+        "upstreams": [
+          "bookstack"
+        ]
+      },
+      {
+        "label": "sogo",
+        "upstreams": [
+          "sogo"
+        ]
+      },
+      {
+        "label": "jellyfin",
+        "upstreams": [
+          "jellyfin"
+        ]
+      },
+      {
+        "label": "firefly",
+        "upstreams": [
+          "firefly-native-api",
+          "firefly-sso"
+        ]
+      },
+      {
+        "label": "firefly-importer",
+        "upstreams": [
+          "firefly-importer-sso"
+        ]
+      },
+      {
+        "label": "donetick",
+        "upstreams": [
+          "donetick"
+        ]
+      },
+      {
+        "label": "donetick-native",
+        "upstreams": [
+          "donetick"
+        ]
+      },
+      {
+        "label": "erpnext",
+        "upstreams": [
+          "erpnext"
+        ]
+      },
+      {
+        "label": "qbittorrent",
+        "upstreams": [
+          "qbittorrent"
+        ]
+      },
+      {
+        "label": "qbittorrent-native",
+        "upstreams": [
+          "qbittorrent"
+        ]
+      },
+      {
+        "label": "api.bookstack",
+        "upstreams": [
+          "bookstack"
+        ]
+      },
+      {
+        "label": "seafile",
+        "upstreams": [
+          "seafile"
+        ]
+      },
+      {
+        "label": "files",
+        "upstreams": [
+          "seafile"
+        ]
+      },
+      {
+        "label": "files-native",
+        "upstreams": [
+          "seafile"
+        ]
+      },
+      {
+        "label": "onlyoffice",
+        "upstreams": [
+          "onlyoffice"
+        ]
+      },
+      {
+        "label": "matrix",
+        "upstreams": [
+          "synapse"
+        ]
+      },
+      {
+        "label": "matrix-auth",
+        "upstreams": [
+          "matrix-authentication-service"
+        ]
+      },
+      {
+        "label": "api.matrix",
+        "upstreams": [
+          "synapse"
+        ]
+      },
+      {
+        "label": "element",
+        "upstreams": [
+          "element"
+        ]
+      },
+      {
+        "label": "chat",
+        "upstreams": [
+          "element"
+        ]
+      },
+      {
+        "label": "matrix-rtc",
+        "upstreams": [
+          "matrix-rtc-auth"
+        ]
+      },
+      {
+        "label": "mastodon",
+        "upstreams": [
+          "mastodon-web",
+          "portal"
+        ]
+      },
+      {
+        "label": "social",
+        "upstreams": [
+          "mastodon-web",
+          "portal"
+        ]
+      },
+      {
+        "label": "jupyterhub",
+        "upstreams": [
+          "jupyterhub"
+        ]
+      },
+      {
+        "label": "homeassistant",
+        "upstreams": [
+          "homeassistant"
+        ]
+      },
+      {
+        "label": "home",
+        "upstreams": [
+          "homeassistant"
+        ]
+      },
+      {
+        "label": "home-native",
+        "upstreams": [
+          "homeassistant"
+        ]
+      },
+      {
+        "label": "ntfy",
+        "upstreams": [
+          "ntfy"
+        ]
+      },
+      {
+        "label": "ntfy-native",
+        "upstreams": [
+          "ntfy"
+        ]
+      },
+      {
+        "label": "forgejo",
+        "upstreams": [
+          "forgejo"
+        ]
+      },
+      {
+        "label": "websearch",
+        "upstreams": [
+          "searxng"
+        ]
+      }
+    ],
+    "deviations": [
+      {
+        "id": "vault",
+        "source": "vaultwarden/pass reference Caddy routes",
+        "destination": "Keykeeper plus OpenBao",
+        "contract": "independent identities, encrypted secrets, separate recovery; no Vaultwarden or compatibility claim"
+      },
+      {
+        "id": "postgres",
+        "source": "postgres plus postgres-ssd",
+        "destination": "one PostgreSQL 17 Timescale owner",
+        "contract": "independent application roles/databases, verified TLS, compatible Timescale extension only where declared"
+      },
+      {
+        "id": "forgejo-ci",
+        "source": "forgejo plus forgejo-runner",
+        "destination": "PostgreSQL-backed Forgejo plus isolated rootless CI",
+        "contract": "scoped trusted repos and rootless runner; no host jobs, socket or registration secrets in jobs"
+      },
+      {
+        "id": "managed-lanes",
+        "source": "test-runners plus jupyter-notebook",
+        "destination": "Worklane plus TUIOS/Pi owned managed lanes",
+        "contract": "genuine jobs and authentic image/tool custody; no phantom daemon or VM"
+      },
+      {
+        "id": "backup",
+        "source": "Kopia container and newly initialized stack state",
+        "destination": "Kopia sole new-production encrypted snapshot owner",
+        "contract": "stopped consistent new-stack data, isolated cold restore and authenticated backup custody; no raw live database copy"
+      },
+      {
+        "id": "identity",
+        "source": "keycloak plus auth gateway and onboarding",
+        "destination": "Keycloak plus invite-only operator-assisted enrollment",
+        "contract": "PKCE TOTP and 30-minute recovery; app grants independently verified, no unreviewed auth gateway"
+      },
+      {
+        "id": "routes",
+        "source": "historical Caddyfile virtual hosts",
+        "destination": "private unactivated approved ingress",
+        "contract": "TLS/backend trust, Matrix API and federation, WebSocket, RTC UDP and mail ports separately verified"
+      },
+      {
+        "id": "lifecycle",
+        "source": "historical compose restart and legacy Podman scripts",
+        "destination": "owned Quadlet/systemd only",
+        "contract": "original CID and ACK custody, fences, no uncertain replay or direct-Podman application fallback"
+      },
+      {
+        "id": "search",
+        "source": "Huly elastic plus shared opensearch",
+        "destination": "separate version-compatible Huly index and OpenSearch",
+        "contract": "do not substitute OpenSearch without tested compatibility"
+      },
+      {
+        "id": "resource",
+        "source": "unbounded old service limits",
+        "destination": "single resource-admitted private release",
+        "contract": "16384 MiB available-memory and 10240 MiB free-disk headroom, no partial-release qualification"
+      }
+    ],
+    "wiring": [
+      {
+        "source": "alertmanager",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route alerts; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "alertmanager",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "alloy",
+        "target": "loki",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "alloy",
+        "target": "loki",
+        "kind": "telemetry",
+        "requirement": "log forwarding with restricted source scope"
+      },
+      {
+        "source": "bookstack",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route api.bookstack; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "bookstack",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "bookstack",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "bookstack",
+        "target": "mariadb",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "bookstack",
+        "target": "mariadb",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "caddy",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "caddy",
+        "target": "mariadb",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "caddy",
+        "target": "memcached",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "caddy",
+        "target": "postgres",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "crowdsec",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "crowdsec",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "donetick",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route donetick-native; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "donetick",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "donetick",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "element",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route chat; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "element",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "element",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "element",
+        "target": "synapse",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "erpnext",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route erpnext; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "erpnext",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "erpnext",
+        "target": "mariadb",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "erpnext",
+        "target": "mariadb",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "erpnext",
+        "target": "valkey",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "erpnext",
+        "target": "valkey",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "firefly-iii",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route firefly-importer; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "firefly-iii",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "firefly-iii",
+        "target": "keycloak",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "firefly-iii",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "firefly-iii",
+        "target": "mailserver",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "firefly-iii",
+        "target": "postgres",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "forgejo",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route forgejo; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "forgejo",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "forgejo",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "forgejo",
+        "target": "mariadb",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "forgejo",
+        "target": "memcached",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "forgejo",
+        "target": "opensearch",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "forgejo",
+        "target": "postgres",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "forgejo",
+        "target": "postgres",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "forgejo",
+        "target": "valkey",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "forgejo",
+        "target": "worklane",
+        "kind": "managed-lane",
+        "requirement": "rootless trusted-repository CI work, no host socket in jobs"
+      },
+      {
+        "source": "grafana",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route grafana; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "grafana",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "grafana",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "grafana",
+        "target": "loki",
+        "kind": "telemetry",
+        "requirement": "private log datasource and operator RBAC"
+      },
+      {
+        "source": "grafana",
+        "target": "postgres",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "grafana",
+        "target": "postgres",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "grafana",
+        "target": "prometheus",
+        "kind": "telemetry",
+        "requirement": "private datasource and alert drilldown"
+      },
+      {
+        "source": "homeassistant",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route home-native; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "homeassistant",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "homeassistant",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "homeassistant",
+        "target": "ntfy",
+        "kind": "config",
+        "requirement": "token-protected alert topic and observed notification"
+      },
+      {
+        "source": "homeassistant",
+        "target": "postgres",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "homeassistant",
+        "target": "postgres",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "huly",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route huly; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "huly",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "huly",
+        "target": "opensearch",
+        "kind": "deviation",
+        "requirement": "Huly elastic backend remains separate; no untested OpenSearch substitution"
+      },
+      {
+        "source": "jellyfin",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route jellyfin; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "jellyfin",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "jellyfin",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "jupyterhub",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route jupyterhub; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "jupyterhub",
+        "target": "jupyter-notebook",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "jupyterhub",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "jupyterhub",
+        "target": "postgres",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "jupyterhub",
+        "target": "postgres",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "jupyterhub",
+        "target": "valkey",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "keycloak",
+        "target": "bookstack",
+        "kind": "identity",
+        "requirement": "issuer sub claim and exact callback; app grant verified"
+      },
+      {
+        "source": "keycloak",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route onboarding; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "keycloak",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "keycloak",
+        "target": "firefly-iii",
+        "kind": "identity",
+        "requirement": "SSO proxy and native API token bypass denied"
+      },
+      {
+        "source": "keycloak",
+        "target": "forgejo",
+        "kind": "identity",
+        "requirement": "OIDC client, fresh private account ownership, Git/issues and SSH isolation"
+      },
+      {
+        "source": "keycloak",
+        "target": "grafana",
+        "kind": "identity",
+        "requirement": "verified issuer, redirect and role mapping"
+      },
+      {
+        "source": "keycloak",
+        "target": "jupyterhub",
+        "kind": "identity",
+        "requirement": "verified unique subject/username and spawner authorization"
+      },
+      {
+        "source": "keycloak",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "keycloak",
+        "target": "matrix-authentication-service",
+        "kind": "identity",
+        "requirement": "OIDC issuer, verified TLS, redirect allowlist and delegated login/logout/refresh"
+      },
+      {
+        "source": "keycloak",
+        "target": "postgres",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "keycloak",
+        "target": "postgres",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "keycloak",
+        "target": "sogo",
+        "kind": "identity",
+        "requirement": "mail/groupware session mapping independently verified"
+      },
+      {
+        "source": "keycloak",
+        "target": "valkey",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "keycloak",
+        "target": "valkey",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "keykeeper",
+        "target": "keycloak",
+        "kind": "identity",
+        "requirement": "operator-assisted login, no Vaultwarden compatibility assumption"
+      },
+      {
+        "source": "keykeeper",
+        "target": "openbao",
+        "kind": "identity",
+        "requirement": "separate vault key custody and tested restore/revocation"
+      },
+      {
+        "source": "kopia",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route kopia; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "kopia",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "livekit",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route matrix-rtc; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "livekit",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "livekit",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "livekit",
+        "target": "synapse",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "loki",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "mailserver",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "mailserver",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "mailserver",
+        "target": "sogo",
+        "kind": "config",
+        "requirement": "SMTP IMAP mailbox identity and TLS; CalDAV/CardDAV read/write"
+      },
+      {
+        "source": "mariadb",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "mastodon",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route social; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "mastodon",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "mastodon",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "mastodon",
+        "target": "postgres",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "mastodon",
+        "target": "postgres",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "mastodon",
+        "target": "valkey",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "mastodon",
+        "target": "valkey",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "mastodon-rss-publisher",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "mastodon-rss-publisher",
+        "target": "mastodon",
+        "kind": "config",
+        "requirement": "47 freshly minted feed-bot tokens, one distinct new observer and idempotent reconciliation"
+      },
+      {
+        "source": "mastodon-rss-publisher",
+        "target": "mastodon",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "mastodon-rss-publisher",
+        "target": "postgres",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "mastodon-rss-publisher",
+        "target": "postgres",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "mastodon-rss-publisher",
+        "target": "valkey",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "mastodon-rss-publisher",
+        "target": "valkey",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "matrix-authentication-service",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route matrix-auth; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "matrix-authentication-service",
+        "target": "keycloak",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "matrix-authentication-service",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "matrix-authentication-service",
+        "target": "postgres",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "matrix-authentication-service",
+        "target": "postgres",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "matrix-authentication-service",
+        "target": "synapse",
+        "kind": "identity",
+        "requirement": "matching shared secret and token delegation; room/bootstrap replay forbidden"
+      },
+      {
+        "source": "matrix-authentication-service",
+        "target": "synapse",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "node-exporter",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "node-exporter",
+        "target": "prometheus",
+        "kind": "telemetry",
+        "requirement": "private scrape only"
+      },
+      {
+        "source": "ntfy",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route ntfy-native; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "ntfy",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "ntfy",
+        "target": "keycloak",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "ntfy",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "onlyoffice",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route onlyoffice; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "onlyoffice",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "onlyoffice",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "openbao",
+        "target": "keycloak",
+        "kind": "identity",
+        "requirement": "scoped operator roles and independent offline recovery"
+      },
+      {
+        "source": "opensearch",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "opensearch",
+        "target": "keycloak",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "opensearch",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "opensearch",
+        "target": "postgres",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "opensearch",
+        "target": "postgres",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "pi",
+        "target": "tuios",
+        "kind": "managed-lane",
+        "requirement": "managed CLI custody without host runner privileges"
+      },
+      {
+        "source": "planka",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route planka; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "planka",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "planka",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "planka",
+        "target": "postgres",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "planka",
+        "target": "postgres",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "postgres",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "prometheus",
+        "target": "alertmanager",
+        "kind": "telemetry",
+        "requirement": "rules and observed notification delivery"
+      },
+      {
+        "source": "prometheus",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route prometheus; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "prometheus",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "prometheus",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "qbittorrent",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route qbittorrent-native; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "qbittorrent",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "qbittorrent",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "seafile",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route files-native; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "seafile",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "seafile",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "seafile",
+        "target": "mariadb",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "seafile",
+        "target": "mariadb",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "seafile",
+        "target": "onlyoffice",
+        "kind": "config",
+        "requirement": "document JWT and bidirectional browser callback plus coordinated restore"
+      },
+      {
+        "source": "seafile",
+        "target": "valkey",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "seafile",
+        "target": "valkey",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "searxng",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route websearch; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "searxng",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "searxng",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "sogo",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route sogo; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "sogo",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "sogo",
+        "target": "keycloak",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "sogo",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "sogo",
+        "target": "mailserver",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "sogo",
+        "target": "mariadb",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "sogo",
+        "target": "mariadb",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "sogo",
+        "target": "memcached",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "sogo",
+        "target": "memcached",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "synapse",
+        "target": "caddy",
+        "kind": "route",
+        "requirement": "private approved route api.matrix; TLS/WebSocket/path/auth contract, no public activation"
+      },
+      {
+        "source": "synapse",
+        "target": "caddy",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "synapse",
+        "target": "element",
+        "kind": "config",
+        "requirement": "server name, homeserver, federation and browser origin preserved"
+      },
+      {
+        "source": "synapse",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "synapse",
+        "target": "livekit",
+        "kind": "config",
+        "requirement": "RTC authorization, WebSocket and UDP/TURN independent of HTTP"
+      },
+      {
+        "source": "synapse",
+        "target": "matrix-authentication-service",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "synapse",
+        "target": "postgres",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "synapse",
+        "target": "postgres",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "synapse",
+        "target": "valkey",
+        "kind": "provider",
+        "requirement": "private network and per-consumer grants; no shared superuser"
+      },
+      {
+        "source": "synapse",
+        "target": "valkey",
+        "kind": "startup",
+        "requirement": "ordered health or completed initializer; native readiness required"
+      },
+      {
+        "source": "tuios",
+        "target": "worklane",
+        "kind": "managed-lane",
+        "requirement": "authentic agent execution artifacts and bounded jobs"
+      },
+      {
+        "source": "valkey",
+        "target": "kopia",
+        "kind": "state-backup",
+        "requirement": "consistent owner-scoped state, credentials and isolated functional recovery"
+      },
+      {
+        "source": "worklane",
+        "target": "keycloak",
+        "kind": "identity",
+        "requirement": "human and agent lane grants with explicit revocation"
+      }
+    ]
+  },
+  "extraBindings": [
+    {
+      "id": "keykeeper",
+      "nativeDaemons": [
+        "keeper"
+      ]
+    },
+    {
+      "id": "openbao",
+      "nativeDaemons": [
+        "bao"
+      ]
+    },
+    {
+      "id": "worklane",
+      "nativeControl": "managed-lane-targets"
+    },
+    {
+      "id": "tuios",
+      "nativeControl": "managed-lane-targets"
+    },
+    {
+      "id": "pi",
+      "nativeControl": "managed-lane-targets"
+    },
+    {
+      "id": "forgejo-runner",
+      "nativeControl": "forgejo-ephemeral-rootless-runner",
+      "historicalDisposition": "ROOTLESS_CI_CONTROL"
+    },
+    {
+      "id": "keycloak-auth-gateway",
+      "nativeDaemons": [
+        "auth-gateway"
+      ],
+      "historicalDisposition": "EXECUTABLE_SUPPORT"
+    },
+    {
+      "id": "portal",
+      "nativeDaemons": [
+        "portal"
+      ],
+      "historicalDisposition": "EXECUTABLE_SUPPORT"
+    }
+  ]
+}

@@ -1,0 +1,200 @@
+schemaVersion: 2
+provenanceSha256: b12ef0f90f9e4b8262f28058151def6c44c7f3f6597583787de3688bd66bc5cd
+manifestResource: canonical/r10/manifest.yaml
+manifestSha256: e31a5170230acc57dafb901dea02d8167eb16770461d7c11c49f78139fc42d55
+recentManifestSha256: 6c230a3dc90d46809b636874b4435871543eb85d869a95eff5b8aa358d33f786
+previousManifestSha256: b67e948e6cf68398a61d3d284de7ee1abeeaf8b57897afa6b057949e7e84a53c
+intermediateManifestSha256: 4289beb343bd5895691523d4cc347e61baf74af32b78b7a495a86846af881133
+priorManifestSha256: 22c4dc7d401c6bcb0053125872f472691cefe13147b7b8902833f796b27a65a1
+latestPriorManifestSha256: fad72915041487cd34c1dcf650d8f924f873a196d3f02305222c15423ae3b0cb
+penultimateManifestSha256: 01a16971a26a2b30e2e8c395029ef46bee1081c4380c32ad323b4ce9171199a8
+lastManifestSha256: 08bbd8fb06880329deb6fc60de1876d621b049abe177eb65262cf640bd7f5355
+entries:
+- id: shared-valkey-acl
+  revision: 2
+  resource: valkey/r2/fragment.yaml
+  sha256: d042ae5a9e720a354f0a3b5c6cc9ad0012833dbf16977c78e1a658898b18b734
+- id: shared-ntfy
+  revision: 3
+  resource: ntfy/r3/fragment.yaml
+  sha256: 5d21bb59c7477250c93936ba6a3a348994532e693d8314a2d8213ab44bbb3e89
+- id: planka-postgres
+  revision: 2
+  resource: planka/r2/fragment.yaml
+  sha256: 9b9c9fac25ee9037e0ef045f5bd9c024f0e021f65ff595ccfd34339b166117ca
+- id: shared-mariadb
+  revision: 2
+  resource: mariadb/r2/fragment.yaml
+  sha256: 8059643cb226b15247d1fcea2ed7378fdce7e1d02224a66472211c017a6934d2
+- id: shared-memcached
+  revision: 1
+  resource: memcached/r1/fragment.yaml
+  sha256: 927f52a85ead969ad3812437601ceea9bf3c0f4a93a3b0e2ab01c80573e57ebe
+- id: identity-keycloak
+  revision: 3
+  resource: keycloak/r3/fragment.yaml
+  sha256: 238a41dca23ffa24a8d2f625b4f8e7f5c4b8d88ee80a747ba113af92cb729a25
+- id: private-alertmanager
+  revision: 2
+  resource: alertmanager/r2/fragment.yaml
+  sha256: d078c79abe8bf1cf4e93245c02e02ab93e12204579073cbb0ec482ba7fc46ae9
+  templates:
+    alertmanager.yml: 567fd4bd72a73c51d611e907bd05a76e9360ae1689c40b00e667f588f0fdfa4b
+- id: private-prometheus
+  revision: 2
+  resource: prometheus/r2/fragment.yaml
+  sha256: 7498dea5df363ca51a6f53df367dd85b48f7368ec9133d9a936b0fd30d80429a
+  templates:
+    prometheus.yml: 3d0c70e81be5abcb9c1c3b6f057bde17318eb3c73b2ac0ee1a10d3535d6ef68d
+- id: private-loki
+  revision: 1
+  resource: loki/r1/fragment.yaml
+  sha256: 5ace4432b4997e87b999f58e9eeb70ced6ad298ac5016afabbd09c59be1cf4c3
+  templates:
+    loki.yml: 02aac6ba05bddcb325cd851260086168160cfec608c6c6fa3063e4ebc4e88352
+- id: private-alloy
+  revision: 1
+  resource: alloy/r1/fragment.yaml
+  sha256: 16790ec04f86016d2f689cf0f4933fadb1ffddf1039f72923048538bc95ee51c
+  templates:
+    config.alloy: a5c92767c3b6f42b665c8b468aa5b138cd7d05de5cf388a684689cd4acd8f59e
+- id: private-node-exporter
+  revision: 1
+  resource: node-exporter/r1/fragment.yaml
+  sha256: 403d3916cd5eb45d145f474f32cccb58376745dbdbdd91f84f3f7a7e4ac605d2
+- id: private-grafana
+  revision: 2
+  resource: grafana/r2/fragment.yaml
+  sha256: 86d04c405eccff0cdc93ba076f8c2c2254d0b1d9a28daaa88f83296c98c228bc
+  templates:
+    grafana-datasources.yml: 1c335f7b43d40e49a8ec37c4e291a21bfbf5111f9848b912784265fe1fa94050
+- id: private-bookstack
+  revision: 4
+  resource: bookstack/r4/fragment.yaml
+  sha256: d9d28ba3a1cf244472548f8a6fbcf007dc26e2e088360fb04ca94a3f34e49024
+- id: private-caddy
+  revision: 3
+  resource: caddy/r3/fragment.yaml
+  sha256: 627859d5f648dbb68806a0e0fee4d0b62dff9506b91bb4ad547774bf7d57522b
+- id: private-crowdsec
+  revision: 1
+  resource: crowdsec/r1/fragment.yaml
+  sha256: 999f7327cdfd11c28995149bae6aeb2ed98d79a2d9404ad899188b36a4011945
+- id: private-donetick
+  revision: 3
+  resource: donetick/r3/fragment.yaml
+  sha256: 8e0a1db82ed1a0e39478adcd2165f0fbf088b3554221399f5c10ce6186243f1b
+- id: private-element
+  revision: 2
+  resource: element/r2/fragment.yaml
+  sha256: 299726abc057ae600860062de246342b66cb7fdcf7f1ab04238276e31168b02c
+- id: private-erpnext
+  revision: 1
+  resource: erpnext/r1/fragment.yaml
+  sha256: 8ed568bfe1c2ed8210628bf8bfa536d134aeaf5727447416034c969c1fa1d316
+- id: private-firefly-iii
+  revision: 5
+  resource: firefly-iii/r5/fragment.yaml
+  sha256: f325d7fb2c341d757482fd8f2a7bc03927491918086d8e1229cf5d681052d676
+  templates:
+    finance-ingress-php.ini: 6c10071cbeb910feb2b3596a80ad34a7bec72d2aae239942652081d585eb150e
+    bootstrap-app.php: ae3c2ccca0ff5667ddad2831c21f24c2352b23e6a74f02cc7c8109637cac4a98
+    importer.php: 39d98504440b4369f1d978182ef4eaa9fc8dfdbce70701d5c5fbbf5eb31fb304
+    initialize-policy.php: b2b774a43a93064b5ad2e223703950ac84256c27288422f37724132620088d9b
+    restore-access-reset.php: 921f34de5b309ec5a42cb5846afee3e256697400ab95daa103a61fc58e889614
+    bootstrap-hook.sh: 2152e8bde0d66cce2c76435756f45dfbce98782e524a4e9d0e31c3da367fba7d
+    native-api.caddyfile: d8148a6162bd6be32f35047fd6cf0f8a46367de33d126faac2fff1d045e7ced4
+    session.php: 64cb48e5ffd0e361435569c3d3f0f826951a49d0b24bda8a17906b28e00c2e94
+    importersubjects.php: 6da2ae2a33245989077cda3c537b0eb4f853620d417628c4b9fa02c03b262dab
+    manualfilepolicy.php: 320fe642b2db16c2f48cfed777a37a60230f01e1d56fe20574398a331c9bb9c6
+    subjectboundary.php: c75ebc2c7e4521fd07c665aee1bf59ed27aacecf125b6ef0910362b81b21fc74
+    importjobrepository.php: a59aed1d67ea0f01a7abda64dc7d1ee5d6ce59db3b898437205ff64586e7fda6
+    webindexcontroller.php: a6f79f7828e1ab13f0c2735c36ed98c626f67a74e29b007b3cc3379afe63dabf
+    apiimportjobscontroller.php: 871a7ff497e261c75ee792db1226734c9a4059dfc9d26617fcb025c63712ce46
+    apisubjectboundary.php: cee39abb3a14b2ab5f6af22049c4dd8da068970c8f0c6253e66bce8caa202f85
+    authserviceprovider.php: 20924926bdf320a8341ab66b234a4635ab3a1d4739d4d2806827069169f5ca11
+- id: private-homeassistant
+  revision: 1
+  resource: homeassistant/r1/fragment.yaml
+  sha256: dd93e02ab0ddf0466031366a7a72332b039970bb12ddab492417beab976bc078
+  templates:
+    recovery-guard.py: f0ab648dbb95ff994a665f0b1222815e2e05206d5b0254d984f6068e9fe24d6d
+- id: private-huly
+  revision: 1
+  resource: huly/r1/fragment.yaml
+  sha256: 6ec5467be16faf19f5224e9068b8f92f1d1eea80d587c88aec2d2503ad9b5f83
+- id: private-jellyfin
+  revision: 1
+  resource: jellyfin/r1/fragment.yaml
+  sha256: c9567c6d9dc9b9b00ff69792eb1f4350c2ecfd2285038871e3c84ac36e95d88d
+- id: private-jupyter-notebook
+  revision: 1
+  resource: jupyter-notebook/r1/fragment.yaml
+  sha256: 93a51c7ca24e504191f9591e330d4dc8a85954aa565c3a7dc8aeacdbca8c6b3d
+- id: private-jupyterhub
+  revision: 1
+  resource: jupyterhub/r1/fragment.yaml
+  sha256: 15ac877076e2298c286a1a5eaba1177677b48b4c5378ffc22a0e218bf6c5155a
+- id: private-keycloak-auth-gateway
+  revision: 1
+  resource: keycloak-auth-gateway/r1/fragment.yaml
+  sha256: 4d810576eec04d4c60f5bc399dbc5b5cdccf71018cc42bf947f326fe1f814013
+- id: private-keykeeper-bao-oidc
+  revision: 1
+  resource: keykeeper/r1/fragment.yaml
+  sha256: 06f750f97b1257fc5f2d8a22f308fd00b02884180aca9725038c81feb540d63a
+- id: private-livekit-matrix-rtc
+  revision: 1
+  resource: livekit/r1/fragment.yaml
+  sha256: 072b8cf538ae9eeadef1c2656df4eed29c4285d5c129430091c374f3d17a9c73
+- id: private-native-mailserver
+  revision: 1
+  resource: mailserver/r1/fragment.yaml
+  sha256: 77c0bc2dd012fc8fca7b0701a88ba275710259d7100779e9202b641a1904efd0
+- id: private-mastodon-shared-redis-bridge
+  revision: 5
+  resource: mastodon/r5/fragment.yaml
+  sha256: 3a0a9f391d11a462ff581b6a09f9f60e09ce9013f543f01652f876341dc4658f
+- id: private-matrix-authentication-service
+  revision: 3
+  resource: matrix-authentication-service/r3/fragment.yaml
+  sha256: 9af7281680cbf0b877ee2b59cef5a172781ca126d92a46a0feb917d600917673
+- id: private-onlyoffice
+  revision: 1
+  resource: onlyoffice/r1/fragment.yaml
+  sha256: 0f9d6f6eb673e5d053c22272f22da0e28835145f9f3a7472ab8b0b51a7e29abf
+- id: private-openbao
+  revision: 1
+  resource: openbao/r1/fragment.yaml
+  sha256: 086613901ff13f6051f080c9f83ea8e0283dee2ecba504696b216db490185cd3
+- id: private-opensearch
+  revision: 2
+  resource: opensearch/r2/fragment.yaml
+  sha256: d280d2581ea0069f7398748f2ba3d9e3e20b8ae0acc72d030a1eeebf5c422028
+- id: private-portal
+  revision: 1
+  resource: portal/r1/fragment.yaml
+  sha256: e840c0452bedd7305a37afd53cb83b44033f37046d64d007a93422630723a258
+- id: private-qbittorrent
+  revision: 1
+  resource: qbittorrent/r1/fragment.yaml
+  sha256: f9e2ee00261a4c7b0bdaa3fcde0783261f3cf7b4c7c1400f64985cc5eac80e6b
+- id: private-seafile
+  revision: 2
+  resource: seafile/r2/fragment.yaml
+  sha256: 65ff5fa2b68fe147601fa8ef2644bc8473ad3838eaff0fcccf5eb32e34fdc632
+- id: private-searxng
+  revision: 1
+  resource: searxng/r1/fragment.yaml
+  sha256: 93bd650d9857809e46c6abda3c242c7ea206507c6b3c74e7547abb6a7f59e2ba
+- id: private-sogo-mail-groupware
+  revision: 2
+  resource: sogo/r2/fragment.yaml
+  sha256: 8cf5556c88a6c83997bda8c80b1f3a2815ec8abb04e2682e1a786d31125084e0
+- id: private-synapse
+  revision: 1
+  resource: synapse/r1/fragment.yaml
+  sha256: c389fcb09c3c902737565b9ecd59888b92c97e4c9c2f0e34fb89efc82b8ad7ca
+generatedCaddyfileSha256: 2459e1d6bbdf6381e24a008bfca6981d561987a598e72d684d22ea953de889c1
+adaptedCaddyJsonSha256: 35c04b8e6cd471f241c017ad410b991e28cc5d22bc24f8440ed181e848dc9176
+caddyResource: canonical/r10/generated-caddy.json

@@ -1,7 +1,46 @@
 {
   "schemaVersion": 1,
-  "operator": "sole-operator",
-  "executionBoundary": "offline-compilation-and-unit-tests-only",
+  "operator": "direct-main-assistant-no-subagents",
+  "executionBoundary": "bounded-development-through-two-qualification-cycles",
+  "workerPolicy": {
+    "maximumImplementationWorkers": 1,
+    "coordinatorProductionWrites": true,
+    "nestedAgents": false,
+    "writeAuthority": "direct-implementation-preserve-existing-work",
+    "inactivePaths": "historical-claims-not-current-authority"
+  },
+  "currentLimits": {
+    "allowed": ["source-read-search-diff", "source-and-test-writes", "builds-and-targeted-tests", "inventory-execution", "artifact-acquisition-and-image-builds", "bounded-integration-and-two-qualification-cycles"],
+    "forbidden": ["subagents", "public-production-cutover", "historical-rss-publication", "irreversible-external-actions", "unrelated-host-changes", "uncertain-effect-replay", "git-publication"],
+    "futureExecution": "public-cutover-and-external-effects-require-separate-authorization",
+    "sourceReviewIsTesting": false,
+    "sourceCompletion": "not-established-by-census",
+    "qualification": {"completed": 0, "required": 2}
+  },
+  "adapterSourceReferences": {
+    "runners/bookstack-native.py": [
+      "platform/src/main/kotlin/net/datamancy/platform/BookStackRuntime.kt",
+      "platform/src/main/kotlin/net/datamancy/platform/BusinessApplicationRecovery.kt"
+    ],
+    "runners/bookstack-browser.py": [
+      "acceptance/scripts/BookStackBrowserProbe.java",
+      "platform/scripts/test-private-bookstack-browser.py"
+    ],
+    "runners/erpnext-native.py": [
+      "platform/src/main/kotlin/net/datamancy/platform/ErpNextRuntime.kt",
+      "platform/src/main/kotlin/net/datamancy/platform/ErpNextRecovery.kt",
+      "platform/scripts/test-private-erpnext.py"
+    ],
+    "runners/erpnext-browser.py": [
+      "acceptance/scripts/ErpNextBrowserProbe.java",
+      "platform/scripts/test-private-erpnext.py"
+    ],
+    "runners/firefly-iii-native.py": [
+      "platform/src/main/kotlin/net/datamancy/platform/FireflyCanonical.kt",
+      "platform/src/main/kotlin/net/datamancy/platform/FireflyRecovery.kt",
+      "platform/scripts/test-firefly-encrypted-restore.py"
+    ]
+  },
   "domains": [
     {
       "id": "canonical-providers", "status": "source-present",

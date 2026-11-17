@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Authenticated private SFU API plus actual synthetic Chromium media; not Matrix/Android acceptance."""
+if not __debug__:
+    raise SystemExit('Optimized Python refused before imports or effects')
 import argparse
 import base64
 import hashlib
@@ -108,7 +110,9 @@ def main():
         status, created = api('CreateRoom', {'name': room, 'max_participants': 2}, admin)
         assert status == 200 and created['name'] == room
         assert api('DeleteRoom', {'room': room}, receiver)[0] in (401, 403)
-        inputs = {'directory': str(directory), 'sdk': str(SDK), 'worker': str(WORKER), 'mediaKey': secrets.token_hex(32), 'wrongMediaKey': secrets.token_hex(32), 'spki': base64.b64encode(hashlib.sha256(der).digest()).decode(),
+        inputs = {'directory': str(directory), 'sdk': str(SDK), 'worker': str(WORKER),
+                  'chromium': '/mnt/media/p0-v3/cache/ms-playwright/chromium-1187/chrome-linux/chrome',
+                  'mediaKey': secrets.token_hex(32), 'wrongMediaKey': secrets.token_hex(32), 'spki': base64.b64encode(hashlib.sha256(der).digest()).decode(),
                   'address': address, 'sfuAddress': sfu_address, 'senderToken': sender, 'receiverToken': receiver, 'invalidToken': invalid}
         with tempfile.TemporaryDirectory(prefix='rt-', dir='/mnt/media/p0-v3/cache') as scratch:
             result = subprocess.run(['sudo', '-n', 'nsenter', '--target=' + str(data['State']['Pid']), '--net',

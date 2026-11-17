@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 2,
+  "id": "private-grafana",
+  "revision": 2,
+  "product": "grafana",
+  "artifacts": [
+    "grafana"
+  ],
+  "providers": [
+    "prometheus",
+    "loki"
+  ],
+  "networks": [
+    "metrics-private",
+    "grafana-web"
+  ],
+  "providerNetworks": {
+    "prometheus": [
+      "metrics-private"
+    ],
+    "loki": [
+      "metrics-private"
+    ]
+  },
+  "volumes": [
+    {
+      "id": "grafana",
+      "userId": 472
+    }
+  ],
+  "inputs": [
+    {
+      "name": "grafana-datasources.yml",
+      "owner": "grafana",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "grafana"
+      ]
+    },
+    {
+      "name": "grafana-runtime.env",
+      "owner": "grafana",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "grafana"
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "output": "grafana-datasources.yml",
+      "resource": "grafana-datasources.yml",
+      "format": "LITERAL",
+      "parameters": {}
+    }
+  ],
+  "processes": [
+    {
+      "id": "grafana",
+      "artifact": "grafana",
+      "userId": 472,
+      "memoryMiB": 1024,
+      "networks": [
+        "metrics-private",
+        "grafana-web"
+      ],
+      "volumes": [
+        {
+          "volume": "grafana",
+          "target": "/var/lib/grafana"
+        }
+      ],
+      "environmentFile": "grafana-runtime.env",
+      "files": [
+        {
+          "file": "grafana-datasources.yml",
+          "target": "/etc/grafana/provisioning/datasources/p0v3.yml"
+        }
+      ],
+      "readinessHttpPort": 3000,
+      "readinessHttpPath": "/api/health"
+    }
+  ],
+  "install": {
+    "processes": [
+      "grafana"
+    ],
+    "dependencies": {
+      "grafana": [
+        "prometheus",
+        "loki"
+      ]
+    }
+  },
+  "restore": {
+    "processes": [
+      "grafana"
+    ],
+    "dependencies": {
+      "grafana": [
+        "prometheus",
+        "loki"
+      ]
+    }
+  },
+  "webNetworks": [
+    "grafana-web"
+  ]
+}

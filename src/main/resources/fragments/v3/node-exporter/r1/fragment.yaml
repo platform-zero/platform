@@ -1,0 +1,25 @@
+schemaVersion: 2
+id: private-node-exporter
+revision: 1
+product: node-exporter
+artifacts: [node-exporter]
+networks: [metrics-private]
+volumes: []
+inputs: []
+processes:
+  - id: node-exporter
+    artifact: node-exporter
+    userId: 65534
+    memoryMiB: 128
+    networks: [metrics-private]
+    command: [--web.listen-address=0.0.0.0:9100, --collector.disable-defaults]
+    readinessHttpPort: 9100
+    readinessHttpPath: /metrics
+install:
+  processes: [node-exporter]
+  dependencies:
+    node-exporter: []
+restore:
+  processes: [node-exporter]
+  dependencies:
+    node-exporter: []

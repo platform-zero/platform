@@ -57,16 +57,27 @@ internal object GenerationRecovery {
             manifest.files.sumOf { it.bytes } == verified.plaintextBytes) { "Foreign recovery observation" }
         RecoverySegments.validate(manifest)
         RecoveryControllerPayloads.validate(manifest)
+        GenerationManagedComponents.validate(manifest)
+        RecoveryCredentialFiles.validate(manifest)
+        QuadletColdEvidence.validate(manifest)
         val reconstructed = manifest.volumes.associateBy { it.name }
         val files = manifest.files.associateBy { it.name }
         require(files.size == manifest.files.size && files.size in 1..4096 &&
             manifest.files.all { it.bytes in 1..RecoveryCapsule.MAX_FILE && it.sha256.matches(Regex("[a-f0-9]{64}")) } &&
             manifest.files.sumOf { it.bytes } <= RecoveryCapsule.MAX_TOTAL)
         val actual = mutableSetOf<String>()
+        val segmentNames = reconstructed.values.flatMap { it.segments }.toSet()
+        var visited = 0
         Files.walk(root).use { paths -> paths.forEach { path ->
+            // A hostile extracted tree cannot turn verification into an unbounded directory
+            // census before the exact manifest comparison is reached. Segment files and
+            // their ancestors are counted separately from manifest logical files.
+            require(++visited <= (files.size + segmentNames.size + 512) &&
+                root.relativize(path).nameCount <= 8) { "Recovered payload tree exceeds bounded cohort" }
             if (Files.isDirectory(path, NOFOLLOW_LINKS)) directory(path)
             else {
                 val name = root.relativize(path).toString()
+                require(name in files || name == "manifest.json" || name in segmentNames) { "Unexpected recovered payload" }
                 RecoveryCapsule.guard(path, if (name in reconstructed) RecoveryCapsule.MAX_TOTAL else RecoveryCapsule.MAX_FILE)
                 actual += name
             }
@@ -86,9 +97,25 @@ internal object GenerationRecovery {
         SiteOwnerships.checkSealed(bundle)
         val memory = bundle.members.sumOf { p -> p.spec.processes.filterNot { it.oneShot }.sumOf { it.memoryMiB.toLong() } +
             (p.spec.processes.filter { it.oneShot }.maxOfOrNull { it.memoryMiB } ?: 0) }
-        require(memory == bundle.memoryReservationMiB && bundle.request.diskReservationMiB >= bundle.members.sumOf { it.spec.volumes.size.toLong() * 1024 })
+        GenerationManagedComponents.validate(bundle.request)
+        require(Math.addExact(memory, GenerationManagedComponents.memoryReservationMiB(bundle.request)) == bundle.memoryReservationMiB &&
+            bundle.request.diskReservationMiB >= Math.addExact(bundle.members.sumOf { it.spec.volumes.size.toLong() * 1024 },
+                GenerationManagedComponents.diskReservationMiB(bundle.request)))
         require(manifest.members.map { it.name } == bundle.members.map { it.member.name }) { "Recovery member cohort mismatch" }
-        val expectedFiles = mutableSetOf("source/bundle.json").apply { addAll(manifest.controllerFiles) }
+        // The source plan, authenticated index/oracle, four materialized logical tar archives
+        // and original manifest must agree before ANY imported member can be admitted.
+        GenerationManagedComponents.validateRecovered(bundle, manifest, root)
+        if (bundle.request.forgejoCi != null || bundle.request.recoveredForgejoCiTarget != null) {
+            val file = "controller/ci-original/cold-custody.json"
+            require(file in manifest.controllerFiles)
+            val original = json.decodeFromString<ForgejoCiOriginalCustody>(bytes(file).decodeToString())
+            require(original.sourceGeneration == bundle.request.id &&
+                original.sourceBundleSha256 == ReleaseLocks.sha256(bytes("source/bundle.json")) &&
+                original.stopResultSha256.keys == setOf("runner", "guard", "transport", "egress", "internal")) {
+                "Recovered CI original effects lack source custody"
+            }
+        }
+        val expectedFiles = mutableSetOf("source/bundle.json").apply { addAll(manifest.controllerFiles); addAll(manifest.managedFiles) }
         val checked = bundle.members.map { pin ->
             val name = pin.member.name
             require(pin.spec.name == name)
@@ -110,7 +137,11 @@ internal object GenerationRecovery {
                     else it.state == "exited" && it.exitCode in setOf(0, 143)
                 }) { "Unfinished initialization or unclean source state" }
             val jobsPath = "$name/jobs.json"
-            if (jobsPath in files) {
+            val quadlet = manifest.quadletSources.singleOrNull { it.member == name }
+            require(quadlet == null || jobsPath !in files) { "Quadlet initializer proof cannot impersonate native runtime.jobs" }
+            if (quadlet != null) {
+                expectedFiles += QuadletColdEvidence.verifyRecovered(quadlet, pin, observation, manifest, ::bytes)
+            } else if (jobsPath in files) {
                 expectedFiles += jobsPath
                 val data = bytes(jobsPath)
                 val jobs = json.decodeFromString<RuntimeJobs>(data.decodeToString())
@@ -124,13 +155,16 @@ internal object GenerationRecovery {
             val volumes = pin.spec.volumes.associate { volume ->
                 val relative = "$name/volumes/${volume.id}.tar"
                 expectedFiles += reconstructed[relative]?.segments ?: listOf(relative)
-                volume.id to VolumeTar.inspect(root.resolve(relative), volume.userId).size
+                volume.id to VolumeTar.inspect(root.resolve(relative), volume.userId,
+                    volume.mappedOwners.map { it.userId to it.groupId }.toSet()).size
             }
             RecoveryMemberCheck(name, pin.runtimeFingerprint, initialized, volumes)
         }
-        require(files.keys == expectedFiles && reconstructed.keys.all { name -> bundle.members.any { pin ->
-            pin.spec.volumes.any { name == "${pin.member.name}/volumes/${it.id}.tar" }
-        } }) { "Recovery payload set is not the exact declared cohort" }
+        require(files.keys == expectedFiles && reconstructed.keys.all { name ->
+            name.matches(Regex("managed/(home|workspace|manifests|transcripts)/tree\\.tar")) || bundle.members.any { pin ->
+                pin.spec.volumes.any { name == "${pin.member.name}/volumes/${it.id}.tar" }
+            }
+        }) { "Recovery payload set is not the exact declared cohort" }
         return RecoveredGeneration(bundle, manifest, root, GenerationRecoveryCheck(verified.generation, verified.id,
             verified.bundleSha256, verified.archiveSha256, checked, kopiaSnapshotId = verified.kopiaSnapshotId,
             kopiaReceiptSha256 = verified.kopiaReceiptSha256))

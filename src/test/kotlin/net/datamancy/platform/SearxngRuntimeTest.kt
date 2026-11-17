@@ -7,7 +7,7 @@ class SearxngRuntimeTest {
     private val inventory = AcquiredInventory(1, "candidate", listOf("searxng", "element").map {
         AcquiredImage(it, "upstream", "example.org/app:1", image, "b".repeat(64), emptyList(), image.substringAfter('@'), "amd64", "linux")
     })
-    @Test fun `recovery checks existing corpus without reseeding and binds immutable inputs`() {
+    @Test fun `recovery checks existing corpus without reseeding and binds immutable inputs`(): Unit {
         val base = java.nio.file.Files.createTempDirectory("p0v3-search-restore-")
         try {
             val source = SearxngRuntime.spec(inventory)
@@ -35,7 +35,7 @@ class SearxngRuntimeTest {
             assertFails { SearxngRecovery.prepare(inventory, recovered, "restored", base) }
         } finally { java.nio.file.Files.walk(base).use { it.sorted(Comparator.reverseOrder()).forEach(java.nio.file.Files::delete) } }
     }
-    @Test fun `native offline search is pinned isolated and durably initialized`() {
+    @Test fun `native offline search is pinned isolated and durably initialized`(): Unit {
         val spec = SearxngRuntime.spec(inventory)
         assertEquals(listOf("corpus-init", "searxng", "search"), PrivateDeployment.validate(spec).map { it.id })
         assertEquals(2, spec.processes.count { !it.oneShot })
@@ -52,5 +52,19 @@ class SearxngRuntimeTest {
         assertFails { SearxngRuntime.spec(inventory.copy(images = inventory.images.take(1))) }
         assertFails { SearxngRuntime.spec(inventory.copy(images = inventory.images.map { it.copy(os = "other") })) }
         assertFails { SearxngRuntime.spec(inventory, "../unsafe") }
+    }
+    @Test fun `canonical search retains original query secret and FTS corpus without one-shot reseed`(): Unit {
+        val graph = SearxngRuntime.canonicalFragment(inventory, "q-111111111111-searxng")
+        val inputs = SearxngRuntime.canonicalInputs { mapOf(
+            "ca.pem" to "CA", "web.pem" to "cert", "web-key.pem" to "key") }
+        assertEquals(PrivateDeployment.inputNames(graph.spec).toSet(), inputs.keys)
+        assertEquals(setOf("search-data", "search-web"), graph.spec.networks.toSet())
+        assertEquals(setOf("search-web"), graph.webNetworks)
+        val cold = SearxngRuntime.coldRestoreFragment(graph)
+        assertEquals(graph.spec.volumes, cold.spec.volumes)
+        assertEquals(setOf("searxng", "searxng-web"), cold.spec.processes.map { it.id }.toSet())
+        assertFalse(cold.spec.processes.any { it.oneShot })
+        assertEquals(graph.spec.processes.single { it.id == "searxng" }.environmentFile,
+            cold.spec.processes.single { it.id == "searxng" }.environmentFile)
     }
 }

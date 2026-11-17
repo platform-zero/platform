@@ -22,6 +22,9 @@ interface ReleaseEffects {
     fun isolateCandidate()
     fun restoreOldSnapshot(snapshotId: String)
     fun verifyOldStack()
+    /** Metadata-only retirement after a global site CAS and actual COMMITTED journal. */
+    fun retirePreviousAfterCommittedSite(): Unit = error("Committed source retirement requires native and global site proof")
+    fun retireInstalledAfterCommittedSite(): Unit = error("First-install retirement requires native functional proof and protected active-site snapshot")
 }
 
 /** Evaluates executed evidence; AI self-qualification is not independent acceptance. */
@@ -43,8 +46,9 @@ class ReleaseTransaction(private val journal: Path, private val effects: Release
         // Never infer safe resume after a crash. Existing journal requires explicit investigation.
         require(!java.nio.file.Files.exists(journal)) { "Transaction journal exists: reconcile the recorded attempt before starting a fresh transaction" }
         deployment?.validate(); update?.validate()
-        require(update == null || deployment == null && lastGood == update.sourceGeneration && effects is ReleaseUpdateEffects) {
-            "Owned update requires an immutable source intent and late-binding actuator"
+        require((lastGood == null) == (update == null) &&
+            (update == null || deployment == null && lastGood == update.sourceGeneration && effects is ReleaseUpdateEffects)) {
+            "Owned update requires an immutable original source intent and late-binding actuator"
         }
         effects.preflight()
         TransactionJournal.append(journal, transactionId, lockDigest, Phase.PREPARED, lastGood, null, deployment, update)
@@ -96,7 +100,7 @@ class ReleaseTransaction(private val journal: Path, private val effects: Release
             candidateLoaded = true
             qualification.verifyRealDomainJourneys()
             val qualificationSnapshot = (effects as? ReleaseQualificationSnapshotEffects)?.verifyQualificationSnapshot()
-            require(update == null || qualificationSnapshot != null) { "Owned update requires candidate functional restore after real-domain execution" }
+            require(qualificationSnapshot != null) { "Install or owned update requires a distinct post-real-domain functional restore" }
             return TransactionJournal.appendExisting(journal, Phase.ACCEPTED, snapshot, qualificationSnapshotId = qualificationSnapshot)
         } catch (failure: Exception) {
             var interrupted = Thread.interrupted() || failure is InterruptedException
@@ -111,20 +115,26 @@ class ReleaseTransaction(private val journal: Path, private val effects: Release
                     failure.addSuppressed(recoveryFailure)
                     recovered = false
                 }
+                // A04's reversible source-hold proof requires the durable rollback terminal
+                // BEFORE target isolation and source resume. A callback is not this record.
+                var recoveryJournaled = false
+                attempt {
+                    TransactionJournal.appendExisting(journal, Phase.RECOVERY_REQUIRED, snapshot)
+                    recoveryJournaled = true
+                }
                 if (reachedCutover || candidateLoaded) attempt { effects.reloadPreviousCaddyConfig() }
                 var isolated = false
                 attempt { effects.isolateCandidate(); isolated = true }
                 if (lastGood != null && writesFrozen) {
                     // A failed stop/timeout is NOT proof of target isolation. Never restore/resume
                     // source state while a competing candidate may still write to its providers.
-                    if (snapshot != null && snapshotVerified && isolated && recovered) {
+                    if (snapshot != null && snapshotVerified && isolated && recovered && recoveryJournaled) {
                         var restored = false
                         attempt { effects.restoreOldSnapshot(snapshot); restored = true }
                         if (restored) attempt { effects.verifyOldStack() }
                     } else recovered = false // Never overwrite unverified state or race an unknown writer.
                 }
                 // Never silently reopen writes or outbound jobs on a failed transaction.
-                attempt { TransactionJournal.appendExisting(journal, Phase.RECOVERY_REQUIRED, snapshot) }
                 throw IllegalStateException(
                     if (recovered) "Release failed; candidate isolated; diagnose, correct and qualify a fresh attempt before resuming writes/outbound"
                     else "Release failed; possible external effects or recovery incomplete; reconcile authoritative state before any retry", failure)
@@ -141,19 +151,23 @@ class ReleaseTransaction(private val journal: Path, private val effects: Release
         val deployment = requireNotNull(accepted.deployment) { "Legacy unbound transactions cannot authorize activation" }
         deployment.validate()
         val binding = ReleaseActivationBinding(transactionId, lockDigest, accepted.hash, deployment)
+        val site = authorization as? ReleaseActiveSiteAuthorization ?:
+            error("Install and owned activation need durable global site selection authority")
         val permit = try { authorization.verify(binding) } catch (interrupted: InterruptedException) {
             Thread.currentThread().interrupt()
             throw interrupted
         }
         require(permit.matches(Regex("[a-f0-9]{64}"))) { "Verified activation permit digest required" }
         val claimed = TransactionJournal.appendExisting(journal, Phase.ACTIVATION_STARTED, accepted.snapshotId, expectedHead, permit)
-        try {
+        var selection: String? = null
+        val committed = try {
             authorization.consume(binding, permit, claimed.hash)
+            selection = site?.select(binding, permit, claimed.hash, requireNotNull(accepted.qualificationSnapshotId))
             if (Thread.currentThread().isInterrupted) throw InterruptedException("Activation interrupted before public writes")
             effects.openPublicWrites()
             if (Thread.currentThread().isInterrupted) throw InterruptedException("Activation interrupted before outbound release")
             effects.releaseOutbound() // Last external effect; cannot be recalled.
-            return TransactionJournal.appendExisting(journal, Phase.COMMITTED, accepted.snapshotId, claimed.hash)
+            TransactionJournal.appendExisting(journal, Phase.COMMITTED, accepted.snapshotId, claimed.hash)
         } catch (failure: Exception) {
             var interrupted = Thread.interrupted() || failure is InterruptedException
             fun attempt(action: () -> Unit) {
@@ -174,5 +188,12 @@ class ReleaseTransaction(private val journal: Path, private val effects: Release
                 throw IllegalStateException("Activation failed or uncertain; reconcile authoritative state before any retry", failure)
             } finally { if (interrupted) Thread.currentThread().interrupt() }
         }
+        // A post-COMMITTED metadata failure must NEVER enter activation's rollback catch.
+        // Selection + actual COMMITTED + consumed permit is authoritative even if finalization
+        // acknowledgement is lost. Reconcile the retained global registry without replaying.
+        site.finalize(binding, committed, requireNotNull(selection))
+        if (accepted.update != null) effects.retirePreviousAfterCommittedSite()
+        else effects.retireInstalledAfterCommittedSite()
+        return committed
     }
 }

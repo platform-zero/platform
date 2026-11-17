@@ -1,0 +1,72 @@
+schemaVersion: 2
+id: private-searxng
+revision: 1
+product: searxng
+artifacts: [searxng, element]
+providers: [caddy]
+networks: [search-data, search-web]
+providerNetworks:
+  caddy: [search-web]
+webNetworks: [search-web]
+volumes:
+  - {id: corpus, userId: 977}
+inputs:
+  - {name: searxng-seed.py, owner: searxng, purpose: BOOTSTRAP, consumers: [searxng-corpus-init]}
+  - {name: searxng-searxng.env, owner: searxng, purpose: RUNTIME, consumers: [searxng]}
+  - {name: searxng-settings.yml, owner: searxng, purpose: RUNTIME, consumers: [searxng]}
+  - {name: searxng-nginx.conf, owner: searxng, purpose: RUNTIME, consumers: [searxng-web]}
+  - {name: searxng-web.pem, owner: searxng, purpose: RUNTIME, consumers: [searxng-web]}
+  - {name: searxng-web-key.pem, owner: searxng, purpose: RUNTIME, consumers: [searxng-web]}
+  - {name: searxng-ca.pem, owner: searxng, purpose: RUNTIME, consumers: [searxng-web]}
+processes:
+  - id: searxng-corpus-init
+    artifact: searxng
+    userId: 977
+    oneShot: true
+    memoryMiB: 512
+    networks: [search-data]
+    volumes:
+      - {volume: corpus, target: /corpus}
+    entrypoint: /bin/sh
+    command: [-ec, 'exec /usr/local/searxng/.venv/bin/python /run/secrets/seed.py']
+    files:
+      - {file: searxng-seed.py, target: /run/secrets/seed.py}
+  - id: searxng
+    artifact: searxng
+    userId: 977
+    memoryMiB: 512
+    networks: [search-data]
+    volumes:
+      - {volume: corpus, target: /corpus}
+    entrypoint: /bin/sh
+    command: [-ec, 'exec /usr/local/searxng/.venv/bin/granian searx.webapp:app']
+    environmentFile: searxng-searxng.env
+    files:
+      - {file: searxng-settings.yml, target: /run/secrets/settings.yml}
+    readinessHttpPort: 8080
+    readinessHttpPath: /healthz
+  - id: searxng-web
+    artifact: element
+    userId: 101
+    memoryMiB: 256
+    networks: [search-data, search-web]
+    entrypoint: /usr/sbin/nginx
+    command: [-c, /run/secrets/nginx.conf, -g, 'daemon off;']
+    files:
+      - {file: searxng-nginx.conf, target: /run/secrets/nginx.conf}
+      - {file: searxng-web.pem, target: /run/secrets/web.pem}
+      - {file: searxng-web-key.pem, target: /run/secrets/web-key.pem}
+      - {file: searxng-ca.pem, target: /run/secrets/ca.pem}
+    readinessHttpPort: 8080
+    readinessHttpPath: /healthz
+install:
+  processes: [searxng-corpus-init, searxng, searxng-web]
+  dependencies:
+    searxng-corpus-init: []
+    searxng: [searxng-corpus-init]
+    searxng-web: [searxng, caddy]
+restore:
+  processes: [searxng, searxng-web]
+  dependencies:
+    searxng: []
+    searxng-web: [searxng, caddy]

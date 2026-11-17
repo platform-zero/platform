@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "status": "private-development-artifacts-not-a-reviewed-compatible-release",
+  "images": [
+    {
+      "product": "postgres-timescale",
+      "source": "https://github.com/timescale/timescaledb/commit/4fa2a7c6b579171a1a8966fd87a0d4189ebab43b (internal Apache-2.0 AND LicenseRef-Timescale build; see image-acquisition-receipts/timescale-pg17-231-r4)",
+      "reference": "localhost/p0-v3/postgres-timescale:2.31.0-pg17.11-r4",
+      "pinnedImage": "localhost/p0-v3/postgres-timescale@sha256:a124e99c35c9a6ae7f6cfccb5db1bd51dfc024bacd957fee8848c82d7ff31919",
+      "imageId": "7cd945ac49388b3a008caee3fa77599bfc7901dbdda9ff6746562af82c49793c",
+      "repoDigests": ["localhost/p0-v3/postgres-timescale@sha256:a124e99c35c9a6ae7f6cfccb5db1bd51dfc024bacd957fee8848c82d7ff31919"],
+      "selectedManifestDigest": "sha256:a124e99c35c9a6ae7f6cfccb5db1bd51dfc024bacd957fee8848c82d7ff31919",
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "product": "forgejo",
+      "source": "https://codeberg.org/forgejo/forgejo/releases/tag/v17.0.1",
+      "reference": "codeberg.org/forgejo/forgejo:17.0.1",
+      "pinnedImage": "codeberg.org/forgejo/forgejo@sha256:71e24559e54061ee85a23bfbbc0902e191c9d5f99e5b301fb4a7b89962660a95",
+      "imageId": "b5ae2a0d5d9abdf9a4ac005f65d8971068789d4f5e19a3b8b541e26e8d8a3c0f",
+      "repoDigests": ["codeberg.org/forgejo/forgejo@sha256:71e24559e54061ee85a23bfbbc0902e191c9d5f99e5b301fb4a7b89962660a95", "codeberg.org/forgejo/forgejo@sha256:fcd19ff4ebc85fb098a67e8e1d0d5a84d07dd6e8a23edcfdfd5b71a6178953be"],
+      "selectedManifestDigest": "sha256:71e24559e54061ee85a23bfbbc0902e191c9d5f99e5b301fb4a7b89962660a95",
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  ]
+}

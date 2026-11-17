@@ -1,0 +1,33 @@
+schemaVersion: 2
+id: private-loki
+revision: 1
+product: loki
+artifacts: [loki]
+networks: [metrics-private]
+volumes:
+  - {id: loki, userId: 10001}
+inputs:
+  - {name: loki.yml, owner: loki, purpose: RUNTIME, consumers: [loki]}
+templates:
+  - {output: loki.yml, resource: loki.yml, format: LITERAL, parameters: {}}
+processes:
+  - id: loki
+    artifact: loki
+    userId: 10001
+    memoryMiB: 1024
+    networks: [metrics-private]
+    volumes:
+      - {volume: loki, target: /loki}
+    files:
+      - {file: loki.yml, target: /etc/loki/loki.yml}
+    command: [-config.file=/etc/loki/loki.yml]
+    readinessHttpPort: 3100
+    readinessHttpPath: /ready
+install:
+  processes: [loki]
+  dependencies:
+    loki: []
+restore:
+  processes: [loki]
+  dependencies:
+    loki: []

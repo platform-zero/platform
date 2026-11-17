@@ -3,9 +3,12 @@ package net.datamancy.platform
 import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.concurrent.Flow
 import kotlin.test.*
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 class RssTransportTest {
     private val source = URI("https://example.org/feed")
@@ -18,6 +21,77 @@ class RssTransportTest {
     private fun store(): RssStateStore {
         val dir = Files.createTempDirectory("rss-worker-", PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
         return RssStateStore(dir).also { it.initializeFresh() }
+    }
+    @Test fun `native fixture transport rejects production origin and arbitrary ports before reading private CA`(): Unit {
+        val missing = java.nio.file.Path.of("/nonexistent/rss-fixture-ca.pem")
+        for (origin in listOf("https://social.datamancy.net", "https://127.0.0.1:443",
+            "http://127.0.0.1:19447", "https://user@127.0.0.1:19447", "https://127.0.0.1:19447/feed/")) {
+            assertFailsWith<IllegalArgumentException> { PinnedRssFixtureHttp(URI(origin), missing, "a".repeat(64)) }
+        }
+    }
+    @Test fun `canonical synthetic Mastodon transport refuses duplicate public origin or foreign status before CA`(): Unit {
+        val missing = Path.of("/nonexistent/rss-canonical-ca.pem")
+        for (foreign in listOf("https://127.0.0.1:49152", "https://social.datamancy.net:444",
+            "https://social2.datamancy.net", "http://social.datamancy.net"))
+            assertFailsWith<IllegalArgumentException> {
+                PinnedRssMastodonHttp(URI(foreign), missing, "a".repeat(64))
+            }
+    }
+    @Test fun `original synthetic Mastodon refuses public DNS and foreign private destination before CA`(): Unit {
+        val missing = Path.of("/nonexistent/rss-canonical-ca.pem")
+        val origin = URI("https://social.datamancy.net")
+        assertFailsWith<IllegalArgumentException> { PinnedRssMastodonHttp(origin,missing,"a".repeat(64)) }
+        for (address in listOf("8.8.8.8","127.0.0.1","169.254.1.1","192.168.1.999","social.datamancy.net")) {
+            assertFailsWith<IllegalArgumentException> {
+                PinnedRssMastodonHttp(origin,missing,"a".repeat(64),address,"b".repeat(64))
+            }
+        }
+        assertFailsWith<IllegalArgumentException> {
+            PinnedRssMastodonHttp(origin,missing,"a".repeat(64),"10.7.2.4","invalid")
+        }
+    }
+    @Test fun `restored original RSS source remains a distinct generation member`(): Unit {
+        val original="q-123456789abc"
+        val restored="q-abcdef123456"
+        assertEquals("$original-v2",rssOriginalMemberName(original,restored))
+        assertNotEquals("$restored-v2",rssOriginalMemberName(original,restored))
+        assertFailsWith<IllegalArgumentException> { rssOriginalMemberName(restored,restored) }
+        assertFailsWith<IllegalArgumentException> { rssOriginalMemberName("q-1234",restored) }
+    }
+    @Test fun `restored native RSS cannot create an unowned host bridge client`(): Unit {
+        val foreign = Path.of("/tmp/foreign-restored-rss")
+        assertFailsWith<IllegalArgumentException> {
+            RssRestoredMastodonHttp(foreign, foreign, "a".repeat(64), foreign, "b".repeat(64),
+                foreign, "rssq_123456789abc")
+        }
+    }
+    @Test fun `existing loopback server selects only current pack for all 47 synthetic feed ids`(): Unit {
+        val reviewed=RssPacks.load()
+        assertEquals(47,reviewed.size)
+        assertEquals(9,reviewed.map { it.pack }.toSet().size)
+        for(feed in reviewed) {
+            assertEquals(feed,RssNativeFixtureServer.selectedPackFeed(feed.pack,feed.feed.id))
+            for(otherPack in reviewed.map { it.pack }.toSet()-feed.pack)
+                assertNull(RssNativeFixtureServer.selectedPackFeed(otherPack,feed.feed.id))
+        }
+        assertNull(RssNativeFixtureServer.selectedPackFeed("analysis","unknown"))
+        assertFailsWith<IllegalArgumentException> {
+            RssNativeFixtureServer.selectedPackFeed("analysis","../../public")
+        }
+    }
+    @Test fun `native fixture server rejects absent live phase and case claim before binding a listener`(): Unit {
+        val root = Files.createTempDirectory("rss-fixture-plan-unit-", PosixFilePermissions.asFileAttribute(
+            PosixFilePermissions.fromString("rwx------")))
+        try {
+            val configuration = root.resolve("fixture-server.json")
+            ReleasePrivateFiles.save(configuration, Json.encodeToString(RssNativeFixtureServerPlan(
+                generation = "q-123456789abc", fixtureId = "fixture", pack = "analysis", port = 55000,
+                serverRoot = root.toString(), certificateAuthority = root.resolve("ca.pem").toString(),
+                caSha256 = "a".repeat(64), keyStore = root.resolve("fixture-keystore.p12").toString(),
+                keyStorePasswordFile = root.resolve("fixture-keystore.pass").toString(),
+                keyStoreSha256 = "b".repeat(64), keyStorePasswordSha256 = "c".repeat(64))).toByteArray())
+            assertFailsWith<IllegalArgumentException> { RssNativeFixtureServer.serve(configuration) }
+        } finally { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
     }
     @Test fun `read only bot verification works before publication review without enabling sends`() {
         var calls = 0

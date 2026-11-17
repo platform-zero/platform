@@ -1,3 +1,5 @@
+if not __debug__:
+    raise SystemExit('Optimized Python refused before imports or effects')
 import hashlib
 import importlib.util
 import json
@@ -62,6 +64,17 @@ class RssInstallerTest(unittest.TestCase):
             helpers.distribution = lambda _: ('b' * 64, {}, b'{}')
             with self.assertRaises(AssertionError):
                 installer.install(root, expected, helpers=helpers)
+            self.assertEqual([], calls)
+
+    def test_synthetic_fixture_installer_refuses_non_generation_paths_before_systemd_or_distribution(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture = root / 'rss-qualification' / 'invocation'
+            fixture.mkdir(parents=True)
+            calls = []
+            helpers = SimpleNamespace(distribution=lambda _: calls.append('distribution'))
+            with self.assertRaises(AssertionError):
+                installer.install_fixture(fixture, 'a' * 64, helpers=helpers)
             self.assertEqual([], calls)
 
     def test_linked_and_public_inputs_rejected(self):

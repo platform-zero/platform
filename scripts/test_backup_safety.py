@@ -13,6 +13,58 @@ M = importlib.util.module_from_spec(spec); spec.loader.exec_module(M)
 
 
 class BackupSafetyTests(unittest.TestCase):
+    def test_native_completion_receipt_binds_original_journals_and_isolation(self):
+        import hashlib
+        adapter = Path(__file__).parents[2] / 'acceptance/runners/backup-restore-native.py'
+        spec = importlib.util.spec_from_file_location('backup_restore_native', adapter)
+        native = importlib.util.module_from_spec(spec); spec.loader.exec_module(native)
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory); generation = 'q-abcdef123456'; target = 'q-111111111111'
+            operation = 'cap-111111111111'; bundle = 'a' * 64; target_bundle = 'b' * 64
+            source = base / generation / 'backups' / operation; source.mkdir(parents=True)
+            isolated = base / target / 'isolate.result.json'; isolated.parent.mkdir()
+            def original(path, data):
+                path.write_bytes(data); path.chmod(0o600)
+                return hashlib.sha256(data).hexdigest()
+            snapshot_id = 'c' * 32; fences = {target + '-core': '22222222-2222-2222-2222-222222222222'}
+            snapshot = {'generation': generation, 'bundleSha256': bundle, 'id': operation, 'snapshotId': snapshot_id}
+            access = {'generation': generation, 'operation': operation, 'bundleSha256': bundle}
+            held_sha = original(source / 'held.json', b'held source')
+            result_sha = original(source / 'result.json', json.dumps({'access': access, 'snapshot': snapshot,
+                'passed': True, 'sourceResumed': True, 'failureType': None}).encode())
+            authority_sha = original(source / 'resume.authority.json', b'authorized target')
+            original(source / 'resume.verified.json', json.dumps({
+                'generation': generation, 'operation': operation, 'bundleSha256': bundle}).encode())
+            isolation_sha = original(isolated, b'target isolated')
+            proof = {'access': access,
+                     'heldSha256': held_sha, 'sourceResultSha256': result_sha,
+                     'resumeAuthoritySha256': authority_sha, 'snapshotId': snapshot_id,
+                     'target': target, 'targetBundleSha256': target_bundle, 'targetFences': fences,
+                     'sourceObservations': [{'name': generation + '-core'}],
+                     'targetObservations': [{'name': target + '-core'}]}
+            proof_path = source / 'completion.proof.json'
+            proof_sha = original(proof_path, json.dumps(proof).encode())
+            weekly = {'operation': operation, 'target': target, 'targetBundleSha256': target_bundle,
+                      'snapshot': snapshot,
+                      'sourceResumed': True, 'requiredAssertions': ['fixture:original'],
+                      'functional': {'operation': operation, 'target': target, 'targetBundleSha256': target_bundle,
+                                     'snapshotId': snapshot_id, 'assertions': ['fixture:original'], 'passed': True},
+                      'targetIsolation': {'action': 'isolate', 'passed': True, 'failureType': None,
+                                          'bundleSha256': target_bundle, 'fences': fences},
+                      'nativeCompletion': {'record': {'path': str(proof_path), 'sha256': proof_sha}, 'proof': proof},
+                      'completionProof': {'heldSha256': held_sha, 'sourceResumeResultSha256': result_sha,
+                                          'sourceResumeAuthoritySha256': authority_sha, 'targetIsolationSha256': isolation_sha}}
+            native.checked_weekly(weekly, generation, bundle, base)
+            original(source / 'resume.authority.json', b'changed authority')
+            with self.assertRaises(ValueError): native.checked_weekly(weekly, generation, bundle, base)
+
+    def test_qualified_backup_adapter_refuses_optimized_python_before_effects(self):
+        adapter = Path(__file__).parents[2] / 'acceptance/runners/backup-restore-native.py'
+        result = subprocess.run([sys.executable, '-O', str(adapter)], capture_output=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'optimized Python is refused before imports or effects', result.stderr)
+        self.assertNotIn(b'Traceback', result.stderr)
+
     def test_optimized_refusal_before_imports(self):
         result = subprocess.run([sys.executable, '-O', str(PATH)], capture_output=True)
         self.assertNotEqual(result.returncode, 0)

@@ -1,0 +1,38 @@
+schemaVersion: 2
+id: private-element
+revision: 2
+product: element
+artifacts: [element]
+providers: [caddy, synapse, matrix-authentication-service]
+providerProcesses:
+  matrix-authentication-service: [mas]
+networks: [element-web, synapse-web]
+providerNetworks:
+  caddy: [element-web]
+  synapse: [synapse-web]
+webNetworks: [element-web]
+volumes: []
+inputs:
+  - {name: element-nginx.conf, owner: element, purpose: RUNTIME, consumers: [element-web]}
+  - {name: element.json, owner: element, purpose: RUNTIME, consumers: [element-web]}
+processes:
+  - id: element-web
+    artifact: element
+    userId: 101
+    memoryMiB: 256
+    networks: [element-web, synapse-web]
+    entrypoint: /usr/sbin/nginx
+    command: [-c, /run/secrets/element-nginx.conf, -g, 'daemon off;']
+    files:
+      - {file: element-nginx.conf, target: /run/secrets/element-nginx.conf}
+      - {file: element.json, target: /run/secrets/element.json}
+    readinessHttpPort: 8080
+    readinessHttpPath: /config.json
+install:
+  processes: [element-web]
+  dependencies:
+    element-web: [synapse, mas, caddy]
+restore:
+  processes: [element-web]
+  dependencies:
+    element-web: [synapse, mas, caddy]

@@ -1,0 +1,52 @@
+schemaVersion: 2
+id: shared-mariadb
+revision: 1
+product: mariadb
+artifacts: [mariadb]
+networks: [maria-admin, maria-data]
+volumes:
+  - {id: mariadb, userId: 999}
+inputs:
+  - name: mariadb-bootstrap.env
+    owner: mariadb
+    purpose: BOOTSTRAP
+    consumers: [mariadb-init]
+processes:
+  - id: mariadb-init
+    artifact: mariadb
+    userId: 999
+    oneShot: true
+    memoryMiB: 1024
+    entrypoint: /bin/sh
+    environmentFile: mariadb-bootstrap.env
+    networks: [maria-admin]
+    volumes:
+      - {volume: mariadb, target: /var/lib/mysql}
+    command:
+      - -ec
+      - |
+        mariadb-install-db --no-defaults --datadir=/var/lib/mysql --auth-root-authentication-method=normal --skip-test-db
+        mariadbd --no-defaults --datadir=/var/lib/mysql --bootstrap --skip-networking <<SQL
+        DELETE FROM mysql.global_priv WHERE User = '' OR (User = 'root' AND Host <> 'localhost');
+        FLUSH PRIVILEGES;
+        ALTER USER 'root'@'localhost' IDENTIFIED BY '$MARIADB_ROOT_PASSWORD';
+        SQL
+  - id: mariadb
+    artifact: mariadb
+    userId: 999
+    memoryMiB: 1024
+    entrypoint: /usr/sbin/mariadbd
+    networks: [maria-admin, maria-data]
+    volumes:
+      - {volume: mariadb, target: /var/lib/mysql}
+    command: [--no-defaults, --datadir=/var/lib/mysql, --socket=/tmp/mysql.sock, --pid-file=/tmp/mysql.pid, --bind-address=0.0.0.0, --skip-name-resolve, --max-connections=64, --innodb-buffer-pool-size=128M]
+    readiness: [/bin/sh, -ec, 'mariadb-admin ping --socket=/tmp/mysql.sock --silent']
+install:
+  processes: [mariadb-init, mariadb]
+  dependencies:
+    mariadb-init: []
+    mariadb: [mariadb-init]
+restore:
+  processes: [mariadb]
+  dependencies:
+    mariadb: []

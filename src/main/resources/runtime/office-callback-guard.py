@@ -1,4 +1,6 @@
 """Authenticate and constrain the native Seafile ONLYOFFICE callback before it can fetch/write."""
+if not __debug__:
+    raise SystemExit('Optimized Office callback guard refused before imports or effects')
 import base64
 import hashlib
 import hmac
@@ -80,6 +82,27 @@ class CallbackLedger:
         except BaseException:
             conn.close()
             raise
+    def observe_readonly(self,key):
+        # This is the EXACT deployed guard's operation key and native SQLite file,
+        # never an acceptance-supplied path, SQL statement or caller-declared state.
+        if not isinstance(key,str) or not re.fullmatch('office-callback-v2:[a-f0-9]{64}',key):
+            raise ValueError('Foreign Office callback operation')
+        path=Path('/state/office-callbacks.sqlite3')
+        if self.path!=path or path.is_symlink() or not path.is_file() or path.stat().st_size>134217728:
+            raise ValueError('Foreign or unbounded native Office callback ledger')
+        conn=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=3)
+        try:
+            conn.execute('PRAGMA query_only=ON');conn.execute('PRAGMA trusted_schema=OFF')
+            if conn.execute("SELECT 1 FROM callbacks WHERE key LIKE 'office-callback:%' LIMIT 1").fetchone():
+                raise ValueError('Legacy uncertain Office callbacks require reconciliation')
+            completed=conn.execute("SELECT COUNT(*) FROM callbacks WHERE state='done' AND key LIKE 'office-callback-v2:%'").fetchone()[0]
+            state=conn.execute('SELECT state FROM callbacks WHERE key=?',(key,)).fetchone()
+            if type(completed) is not int or completed>100000 or state is not None and state[0] not in ('pending','done'):
+                raise ValueError('Unbounded or foreign Office callback ledger state')
+            return {'schemaVersion':1,'completedCount':completed,'operationKey':key,
+                    'state':None if state is None else state[0],
+                    'replayAdmission':'deny' if state is not None else 'new-only'}
+        finally:conn.close()
     def reserve(self,key,expires):
         conn=self.connect()
         try:
@@ -124,3 +147,16 @@ class OfficeCallbackGuard:
             # A committed save without a durable acknowledgement remains uncertain.
             return JsonResponse({'error':1},status=503)
         return response
+
+
+if __name__=='__main__':
+    import sys
+    try:
+        if len(sys.argv)!=3 or sys.argv[1]!='--readonly-collector':
+            raise ValueError('Foreign native Office collector invocation')
+        result=CallbackLedger().observe_readonly(sys.argv[2])
+        encoded=json.dumps(result,sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False)
+        if len(encoded)>4096:raise ValueError('Unbounded native callback collector result')
+        print(encoded)
+    except Exception:
+        raise SystemExit('Original native Office callback collector refused; preserve pending intent') from None

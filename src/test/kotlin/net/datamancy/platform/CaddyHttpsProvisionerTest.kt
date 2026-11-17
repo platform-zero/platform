@@ -43,6 +43,105 @@ class CaddyHttpsProvisionerTest {
         override fun portOwner(port: Int) = if (port == 80) PortOwner.OWNED_V3 else PortOwner.FREE
         override fun challenge(host: String, nonce: String) = ChallengeResponse(if (bad) 521 else 200, "p0v3-http01-$nonce", false)
     }
+    @Test fun `V2 public listeners bind only audited primary ingress IP and native listener audit follows both phases`(): Unit {
+        val root = Files.createTempDirectory("https-primary-ip-unit-")
+        Files.setPosixFilePermissions(root, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"))
+        try {
+            val fake = Fake()
+            val audited = mutableListOf<Boolean>()
+            val actor = CaddyHttpsProvisioner(root, binding, fake, "10.89.0.3", { audited += it })
+            actor.stageHttp01(first, fake.hash(), nonces) { PortOwner.FREE }
+            assertEquals("10.89.0.3:80", servers(fake).getValue("owned-http01").jsonObject
+                .getValue("listen").jsonArray.single().jsonPrimitive.content)
+            actor.provision(second, fake.hash(), nonces, AcmeEnvironment.PRODUCTION, observation())
+            assertEquals("10.89.0.3:443", servers(fake).getValue("owned").jsonObject
+                .getValue("listen").jsonArray.single().jsonPrimitive.content)
+            assertEquals(listOf(false, true), audited)
+            assertFalse("\":443\"" in servers(fake).toString() || "\":80\"" in servers(fake).toString())
+            actor.ownedAutomaticRenewalPolicy(fake.hash())
+        } finally { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
+    }
+
+    @Test fun `native primary-IP audit failure retains listener intent until read-only reconciliation`(): Unit {
+        val root = Files.createTempDirectory("https-native-listener-uncertain-")
+        Files.setPosixFilePermissions(root, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"))
+        try {
+            val fake = Fake()
+            var nativeReady = false
+            val actor = CaddyHttpsProvisioner(root, binding, fake, "10.89.0.3", { _ ->
+                require(nativeReady) { "synthetic native listener absent" }
+            })
+            assertFailsWith<IllegalArgumentException> {
+                actor.stageHttp01(first, fake.hash(), nonces) { PortOwner.FREE }
+            }
+            assertEquals(1, fake.writes)
+            val pending = ReleasePrivateFiles.read(root.resolve("pending.json"))
+            assertFalse(Files.exists(root.resolve("$first.result.json")))
+            nativeReady = true
+            val resolved = actor.reconcile(first, ReleaseLocks.sha256(pending))
+            assertEquals("applied", resolved.status)
+            assertEquals(1, fake.writes)
+            assertFalse(Files.exists(root.resolve("pending.json")))
+        } finally { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
+    }
+
+    @Test fun `bounded public renewal observes changed trusted identity and later expiry without rewriting Caddy`(): Unit {
+        val root = Files.createTempDirectory("public-renewal-unit-")
+        Files.setPosixFilePermissions(root, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"))
+        try {
+            val host = "auth.datamancy.net"
+            val old = PublicCertificateIdentity(host, "a".repeat(64), java.time.Instant.now().plusSeconds(1200).toString())
+            val fresh = PublicCertificateIdentity(host, "b".repeat(64), java.time.Instant.now().plusSeconds(7200).toString())
+            var reads = 0; var waited = 0
+            val actor = CaddyPublicRenewal(root, setOf(host), { "f".repeat(64) }, { reads++; if (reads <= 2) old else fresh },
+                { waited++ }, { "d".repeat(64) })
+            val result = actor.observe("r-000000000055", "f".repeat(64), mapOf(host to old), 10)
+            assertTrue(result.changed && result.current.getValue(host) == fresh)
+            assertEquals(3, reads); assertEquals(1, waited)
+            assertFalse(Files.exists(root.resolve("renewal.pending")))
+            assertFailsWith<Exception> { actor.observe("r-000000000056", "f".repeat(64), mapOf(host to old), 10) }
+        } finally { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
+    }
+
+    @Test fun `invented previous identity cannot open a public renewal intent`(): Unit {
+        val root = Files.createTempDirectory("public-renewal-foreign-baseline-")
+        Files.setPosixFilePermissions(root, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"))
+        try {
+            val host = "auth.datamancy.net"
+            val claimed = PublicCertificateIdentity(host, "a".repeat(64), java.time.Instant.now().plusSeconds(3600).toString())
+            val actual = claimed.copy(sha256 = "b".repeat(64))
+            val actor = CaddyPublicRenewal(root, setOf(host), { "f".repeat(64) }, { actual }, nativePolicy = { "d".repeat(64) })
+            assertFailsWith<IllegalArgumentException> {
+                actor.observe("r-000000000055", "f".repeat(64), mapOf(host to claimed), 10)
+            }
+            assertFalse(Files.exists(root.resolve("renewal.pending")))
+        } finally { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
+    }
+
+    @Test fun `renewal rejects changed cert without later expiry and retains prior identity plus uncertain intent`(): Unit {
+        val root = Files.createTempDirectory("public-renewal-failure-unit-")
+        Files.setPosixFilePermissions(root, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"))
+        try {
+            val host = "auth.datamancy.net"
+            val old = PublicCertificateIdentity(host, "a".repeat(64), java.time.Instant.now().plusSeconds(3600).toString())
+            val invalid = old.copy(sha256 = "b".repeat(64))
+            var reads = 0
+            val actor = CaddyPublicRenewal(root, setOf(host), { "f".repeat(64) },
+                { reads++; if (reads == 1) old else invalid }, { error("must not wait") }, { "d".repeat(64) })
+            assertFailsWith<IllegalArgumentException> { actor.observe("r-000000000055", "f".repeat(64), mapOf(host to old), 10) }
+            assertTrue(Files.exists(root.resolve("renewal.pending")))
+            assertFalse(Files.exists(root.resolve("r-000000000055.result.json")))
+            assertFailsWith<IllegalArgumentException> { actor.observe("r-000000000056", "f".repeat(64), mapOf(host to old), 10) }
+        } finally { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
+    }
+
+    @Test fun `native production ACME policy audit rejects staging or stale configuration`(): Unit = test { _, fake, provisioner ->
+        provisioner.stageHttp01(first, fake.hash(), nonces) { PortOwner.FREE }
+        provisioner.provision(second, fake.hash(), nonces, AcmeEnvironment.PRODUCTION, observation())
+        assertTrue(provisioner.ownedAutomaticRenewalPolicy(fake.hash()).matches(Regex("[a-f0-9]{64}")))
+        assertFailsWith<IllegalArgumentException> { provisioner.ownedAutomaticRenewalPolicy("0".repeat(64)) }
+    }
+
     @Test fun `HTTP nonce admission then exact subject automation preserves unrelated resources`() = test { root, fake, provisioner ->
         val original = fake.configuration
         provisioner.stageHttp01(first, fake.hash(), nonces) { PortOwner.FREE }

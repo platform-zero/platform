@@ -4,11 +4,27 @@ import kotlin.test.*
 import kotlinx.serialization.json.*
 
 class MatrixIdentityRuntimeTest {
+    @Test fun `selected MAS verifies graph Keycloak ingress issuer`() {
+        val fragment = PackagedGraphFragment.loadPendingV3("private-matrix-authentication-service", 3, 9)
+        val mas = fragment.definition.processes.single { it.id == "mas" }
+        assertEquals(listOf("identity-web"), fragment.definition.providerNetworks["keycloak"])
+        assertTrue("identity-web" in mas.networks)
+        assertTrue(mas.files.any { it.file == "identity-ca.pem" &&
+            it.target == "/run/secrets/identity-ca.pem" })
+        assertTrue(fragment.definition.processes.filter { it.id in setOf("mas-config-init", "mas-migrate") }
+            .all { p -> p.files.any { it.file == "identity-ca.pem" } })
+        val secrets = List(5) { index -> ("a"[0] + index).toString().repeat(64) }
+        val inputs = MatrixIdentityRuntime.canonicalInputs(secrets[0], secrets[1], secrets[2],
+            "-----BEGIN PRIVATE KEY-----\n" + "A".repeat(1600) + "\n-----END PRIVATE KEY-----\n",
+            secrets[3], secrets[4])
+        assertContains(inputs.getValue("mas-runtime.env"), "SSL_CERT_FILE=/run/secrets/identity-ca.pem")
+        assertContains(inputs.getValue("mas.yaml"), "issuer: https://auth.datamancy.net/realms/p0v3")
+    }
     private val image = "example.org/app@sha256:" + "a".repeat(64)
     private val inventory = AcquiredInventory(1, "candidate", listOf("postgres", "valkey", "ntfy", "synapse", "matrix-authentication-service", "element").map {
         AcquiredImage(it, "upstream", "example.org/app:1", image, "b".repeat(64), emptyList(), image.substringAfter('@'), "amd64", "linux")
     })
-    @Test fun `delegated Matrix identity uses distinct origins durable migrations and closed local passwords`() {
+    @Test fun `delegated Matrix identity uses distinct origins durable migrations and closed local passwords`() : Unit {
         val spec = MatrixIdentityRuntime.spec(inventory)
         assertEquals(13, PrivateDeployment.validate(spec).size)
         assertEquals(6, spec.processes.count { !it.oneShot })

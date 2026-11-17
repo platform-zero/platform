@@ -9,6 +9,24 @@ import kotlinx.serialization.json.Json
 import kotlin.test.*
 
 class GenerationBackupTest {
+    @Test fun `nested recovery deadline cannot reset an outer operation budget`() {
+        assertFails { RecoveryDeadline.remainingMillis() }
+        assertFails { RecoveryDeadline.within(RecoveryDeadline.MAX_MILLIS + 1) { } }
+        RecoveryDeadline.within(5000) {
+            val outer = RecoveryDeadline.remainingMillis()
+            assertTrue(outer in 1..5000)
+            RecoveryDeadline.within(RecoveryDeadline.MAX_MILLIS) {
+                assertTrue(RecoveryDeadline.remainingMillis() <= outer)
+                assertTrue(RecoveryDeadline.observedUtcDeadline().isAfter(java.time.Instant.now()))
+            }
+            RecoveryDeadline.within(750) {
+                assertTrue(RecoveryDeadline.remainingMillis() <= 750)
+                assertFails { RecoveryDeadline.remainingSeconds() }
+            }
+            assertTrue(RecoveryDeadline.remainingMillis() <= outer)
+        }
+        assertNull(RecoveryDeadline.remainingSecondsIfBound())
+    }
     private val json = Json { encodeDefaults = true }
     private val generation = "q-abcdef123456"
     private val cap = "cap-abcdef123456"

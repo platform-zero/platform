@@ -94,6 +94,63 @@ class GenerationRuntimeTest {
         RuntimePreparation.prepare(spec, base) { mapOf("fixture.env" to "VALUE=synthetic-unit-only\n") }
     }
 
+    @Test fun `installed Quadlet audit refuses a direct-backend sealed member before inspecting host units`(): Unit = fixture { f ->
+        val hash = f.engine.seal(f.request)
+        assertFails { f.engine.auditInstalledQuadlet(generation, hash, "$generation-first", "app") }
+        assertTrue(f.fake.calls.isEmpty())
+        assertFails { f.engine.auditInstalledQuadlet(generation, hash, "$generation-foreign", "app") }
+        assertFalse(Files.exists(f.runtime.resolve("$generation-foreign")))
+    }
+    @Test fun `install qualification scope refuses synthetic runtime before a child can launch`(): Unit = fixture { f ->
+        assertFails { f.engine.withInstallQualificationScope(generation, h) {
+            error("Unexpected qualification child")
+        } }
+        assertTrue(f.fake.calls.isEmpty())
+    }
+    @Test fun `restore orchestration refuses unowned test harness before nested native effects`(): Unit = fixture { f ->
+        assertFails { f.engine.withRestoredIsolationLocks(ReleaseGeneration(generation, h),
+            ReleaseGeneration("q-222222222222", h)) { error("Unexpected target invocation") } }
+        assertTrue(f.fake.calls.isEmpty())
+    }
+    @Test fun `public TURN adopter refuses synthetic native actor before any Podman effect`(): Unit = fixture { f ->
+        assertFails { f.engine.adoptEffectiveTurn("turn-111111111111", generation, h,
+            ActivationInput(f.root.resolve("revision.json").toString(), h),
+            setOf("rtc.datamancy.net"), ActivationInput(f.root.resolve("trust.pem").toString(), h)) }
+        assertTrue(f.fake.calls.isEmpty())
+    }
+    @Test fun `public credential publisher refuses injected nonproduction source before native read`(): Unit = fixture { f ->
+        assertFails { f.engine.publishEffectivePublicCertificate("r-111111111111", generation, h,
+            "boards.datamancy.net", setOf("boards.datamancy.net"),
+            ActivationInput(f.root.resolve("trust.pem").toString(), h)) }
+        assertTrue(f.fake.calls.isEmpty())
+    }
+    @Test fun `owned reference retirement cannot infer missing terminal claims from successful callbacks`(): Unit = fixture { f ->
+        assertFails { f.engine.retireOwnedReferences(emptyList()) }
+        assertTrue(f.fake.calls.isEmpty())
+    }
+    @Test fun `owned import rejects raw inventory substitution before repository or target effects`(): Unit = fixture { f ->
+        val sourceSha = f.engine.seal(f.request)
+        val original = f.control.resolve("$generation/bundle.json")
+        val oldInventory = f.root.resolve("old-inventory.json")
+        val candidateInventory = f.root.resolve("candidate-inventory.json")
+        val site = f.root.resolve("approved-site.json")
+        ReleasePrivateFiles.save(oldInventory, "{\"images\":[]}".toByteArray())
+        ReleasePrivateFiles.save(candidateInventory, "{\"images\":[]}".toByteArray())
+        ReleasePrivateFiles.save(site, "{\"site\":\"unit\"}".toByteArray())
+        val rawSha = ReleaseLocks.sha256(ReleasePrivateFiles.read(oldInventory))
+        val intent = ReleaseUpdateIntent(ReleaseGeneration(generation, sourceSha), "q-222222222222",
+            h, ReleaseLocks.sha256(ReleasePrivateFiles.read(site)), rawSha, "b".repeat(64),
+            PlankaVersionTransition("2.2.0", "2.2.1"))
+        val preparation = ReleaseUpdatePreparation(intent = intent,
+            previousInventory = ActivationInput(oldInventory.toString(), rawSha),
+            candidateInventory = ActivationInput(candidateInventory.toString(), "b".repeat(64)),
+            sourceBundle = ActivationInput(original.toString(), sourceSha),
+            sitePolicy = ActivationInput(site.toString(), intent.sitePolicySha256),
+            migrationOperation = "r-111111111111")
+        assertFails { f.engine.importOwnedUpdate(preparation, "cap-111111111111", "unit") }
+        assertFalse(Files.exists(f.control.resolve(intent.targetGeneration)))
+        assertTrue(f.fake.calls.isEmpty(), "Raw SHA mismatch cannot be normalized by JSON reserialization")
+    }
     @Test fun `legacy private fixture cannot gain activation authority from a matching candidate digest`() = fixture { f ->
         val candidate = kotlinx.serialization.json.JsonObject(listOf("implementationSha256", "artifactsSha256", "configurationSha256",
             "acceptanceSha256", "sitePolicySha256").associateWith { kotlinx.serialization.json.JsonPrimitive(h) })
@@ -278,54 +335,46 @@ class GenerationRuntimeTest {
         assertTrue(f.fake.running.isEmpty())
     }
 
-    @Test fun `cold generation capture authenticates every input and volume without restoring or restarting`() = fixture { f ->
+    @Test fun `new production capsule capture is refused in every generation lifecycle state`() = fixture { f ->
         val hash = f.engine.seal(f.request)
         val custody = f.root.resolve("custody")
-        val captureId = "cap-123456789abc"
-        assertFails { f.engine.capture(generation, hash, captureId, custody) }
+        fun refused() {
+            val before = f.fake.calls.toList()
+            val failure = assertFailsWith<IllegalStateException> {
+                f.engine.capture(generation, hash, "cap-123456789abc", custody)
+            }
+            assertTrue(failure.message!!.contains("New production backups require Kopia"))
+            assertEquals(before, f.fake.calls)
+            assertFalse(Files.exists(f.control.resolve("$generation/captures")))
+            assertFalse(Files.exists(custody))
+        }
+        refused()
         assertTrue(f.engine.stage(generation, hash).passed)
-        assertFails { f.engine.capture(generation, hash, captureId, custody) }
+        refused()
         f.engine.isolate(generation, hash)
-        val calls = f.fake.calls.size
-        val result = f.engine.capture(generation, hash, captureId, custody)
-        assertTrue(result.passed)
-        val verified = assertNotNull(result.verification)
-        assertEquals(7, verified.files) // bundle, two manifests, two inputs, two opaque volume exports
-        assertTrue(verified.authenticated)
-        assertFalse(verified.functionalRestoreVerified)
-        assertEquals(verified, f.engine.verifyCapture(generation, hash, captureId, custody))
+        refused()
         assertEquals(0, f.fake.frozenDepth)
-        assertTrue(f.fake.calls.drop(calls).none { it.startsWith("apply:") || it.startsWith("isolate:") })
-        val root = f.control.resolve("$generation/captures/$captureId")
-        assertEquals(0L, Files.list(root).use { it.filter { p -> p.toString().endsWith(".tar") }.count() })
-        assertFails { f.engine.capture(generation, hash, captureId, custody) }
-        val bytes = Files.readAllBytes(root.resolve("state.cap")); bytes[100] = (bytes[100].toInt() xor 1).toByte()
-        Files.write(root.resolve("state.cap"), bytes)
-        assertFails { f.engine.verifyCapture(generation, hash, captureId, custody) }
     }
 
-    @Test fun `capture admission reserves simultaneous scratch and encrypted bytes plus headroom`() = fixture { f ->
+    @Test fun `low disk cannot route new backups through the retired capsule engine`() = fixture { f ->
         val hash = f.engine.seal(f.request)
         f.engine.stage(generation, hash); f.engine.isolate(generation, hash)
         val constrained = GenerationRuntime(f.control, f.runtime, { f.fake.bindings = it; f.fake }, { GenerationCapacity(65536, 20000) })
-        assertFailsWith<IllegalArgumentException> { constrained.capture(generation, hash, "cap-bbbbbbbbbbbb", f.root.resolve("custody")) }
+        assertFailsWith<IllegalStateException> { constrained.capture(generation, hash, "cap-bbbbbbbbbbbb", f.root.resolve("custody")) }
         assertFalse(Files.exists(f.control.resolve("$generation/captures")))
     }
 
-    @Test fun `failed cold export retains intent and failure without qualifying a capsule`() = fixture { f ->
+    @Test fun `retired capture never starts an export or manufactures historical verification`() = fixture { f ->
         val hash = f.engine.seal(f.request)
         f.engine.stage(generation, hash); f.engine.isolate(generation, hash)
         f.fake.failExport = true
+        val before = f.fake.calls.toList()
         val id = "cap-aaaaaaaaaaaa"
-        assertFails { f.engine.capture(generation, hash, id, f.root.resolve("custody")) }
-        val root = f.control.resolve("$generation/captures/$id")
-        assertTrue(Files.exists(root.resolve("capture.intent.json")))
-        val result = Json.decodeFromString<GenerationCaptureOutcome>(Files.readString(root.resolve("capture.result.json")))
-        assertFalse(result.passed)
-        assertNull(result.verification)
+        assertFailsWith<IllegalStateException> { f.engine.capture(generation, hash, id, f.root.resolve("custody")) }
+        assertFalse(Files.exists(f.control.resolve("$generation/captures/$id")))
+        assertEquals(before, f.fake.calls)
         assertEquals(0, f.fake.frozenDepth)
         assertFails { f.engine.verifyCapture(generation, hash, id, f.root.resolve("custody")) }
-        assertFails { f.engine.capture(generation, hash, id, f.root.resolve("custody")) }
     }
 
     @Test fun `foreign files and public control parents fail closed`() = fixture { f ->

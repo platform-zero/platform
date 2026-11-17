@@ -1,0 +1,6 @@
+# Private development only. No receiver can deliver externally until a scoped ntfy identity exists.
+route:
+  receiver: private-inert
+  group_by: [alertname]
+receivers:
+  - name: private-inert

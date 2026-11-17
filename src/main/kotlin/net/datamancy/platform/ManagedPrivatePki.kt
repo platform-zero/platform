@@ -17,6 +17,9 @@ import kotlinx.serialization.json.Json
 @Serializable internal data class PrivatePkiIssue(val operation: String, val profile: PrivatePkiProfile,
     val caSha256: String, val issuedAt: String, val renewAfter: String, val expiresAt: String,
     val previousSha256: String? = null, val material: Map<String, String>)
+@Serializable internal data class PrivatePkiAdoption(val operation: String, val issueSha256: String,
+    val consumer: String, val manifestSha256: String, val fingerprint: String,
+    val caSha256: String, val certificateSha256: String, val keySha256: String)
 
 /** Private controller-only signing custody. Never mount this directory into an application.
  * Renewal issues a new immutable bundle under the same CA; the caller seals it into a replacement
@@ -25,7 +28,8 @@ import kotlinx.serialization.json.Json
  */
 internal class ManagedPrivatePki(private val root: Path,
     private val run: (Path, List<String>) -> Unit = ::privatePkiOpenSsl,
-    private val now: () -> Instant = Instant::now) {
+    private val now: () -> Instant = Instant::now,
+    private val runtimeBase: Path = PrivateDeployment.BASE) {
     companion object {
         private val json = Json { encodeDefaults = true }
         private val operationPattern = Regex("pki-[a-f0-9]{16}")
@@ -74,8 +78,56 @@ internal class ManagedPrivatePki(private val root: Path,
         require(!now().isBefore(Instant.parse(previous.renewAfter))) { "Private certificate is not due for renewal" }
         // A version may have only one renewal descendant. Interrupted renewal never permits another ID.
         ReleasePrivateFiles.save(root.resolve("$previousOperation.renewal"), operation.toByteArray())
-        issueLocked(operation, previous.profile, expectedPreviousSha256)
+        val renewed = issueLocked(operation, previous.profile, expectedPreviousSha256)
+        val originalCert = requireNotNull(previous.material["web.pem"] ?: previous.material["node.pem"])
+        val renewedCert = requireNotNull(renewed.material["web.pem"] ?: renewed.material["node.pem"])
+        require(originalCert != renewedCert && Instant.parse(renewed.expiresAt).isAfter(Instant.parse(previous.expiresAt))) {
+            "Private certificate renewal must change identity and extend expiry; retain old adoption"
+        }
+        renewed
     }
+    /** Issuance is never adoption: require the consumer's sealed runtime inputs to contain this exact
+     * CA and leaf/key revision. Prior consumers retain their own pinned revision until replaced. */
+    fun adopt(operation: String, issueOperation: String, issueSha256: String, consumerManifest: Path,
+        manifestSha256: String, fingerprint: String, caFile: String, certFile: String, keyFile: String): PrivatePkiAdoption =
+        ReleasePrivateFiles.locked(root) {
+            require(operationPattern.matches(operation) && operationPattern.matches(issueOperation) &&
+                listOf(issueSha256, manifestSha256, fingerprint).all { it.matches(Regex("[a-f0-9]{64}")) } &&
+                !Files.exists(root.resolve("$operation.adoption.json"), NOFOLLOW_LINKS))
+            val issueBytes = ReleasePrivateFiles.read(root.resolve("$issueOperation.json"))
+            require(ReleaseLocks.sha256(issueBytes) == issueSha256)
+            val issue = json.decodeFromString<PrivatePkiIssue>(issueBytes.decodeToString())
+            require(issue.operation == issueOperation && issue.caSha256 == authorityHash() &&
+                consumerManifest.isAbsolute && consumerManifest.normalize() == consumerManifest &&
+                consumerManifest.parent == runtimeBase)
+            val manifest = ReleasePrivateFiles.read(consumerManifest)
+            require(ReleaseLocks.sha256(manifest) == manifestSha256)
+            val spec = json.decodeFromString<PrivateDeploymentSpec>(manifest.decodeToString())
+            PrivateDeployment.validate(spec)
+            require(spec.name.matches(Regex("q-[a-f0-9]{12}-[a-z][a-z0-9-]{0,23}")) &&
+                consumerManifest.fileName.toString() == "${spec.name}.json" && spec.store == RuntimeStore.CANONICAL_V2)
+            val material = issue.material
+            val leaf = if (issue.profile.kind == PrivatePkiKind.WEB) "web" else "node"
+            val ca = requireNotNull(material["ca.pem"]); val certificate = requireNotNull(material["$leaf.pem"])
+            val key = requireNotNull(material["$leaf-key.pem"])
+            val inputs = mapOf(caFile to ca, certFile to certificate, keyFile to key)
+            require(inputs.size == 3 && inputs.keys.all { it.matches(Regex("[a-z][a-z0-9-]{0,63}\\.pem")) } &&
+                spec.processes.any { process -> process.files.map { it.file }.containsAll(inputs.keys) }) {
+                "Adopting process must receive the exact CA, cert and key as sealed files"
+            }
+            val consumerRoot = consumerManifest.parent.resolve(spec.name)
+            require(ReleasePrivateFiles.read(consumerRoot.resolve("runtime.owner")).decodeToString() ==
+                "p0v3-private-runtime-v1\n${spec.name}\n$fingerprint\n") {
+                "Consumer revision not bound to the audited runtime fingerprint"
+            }
+            for ((file, expected) in inputs) require(ReleasePrivateFiles.read(consumerRoot.resolve(file)).decodeToString() == expected) {
+                "Consumer did not adopt the pinned private CA revision"
+            }
+            val record = PrivatePkiAdoption(operation, issueSha256, spec.name, manifestSha256, fingerprint,
+                ReleaseLocks.sha256(ca.toByteArray()), ReleaseLocks.sha256(certificate.toByteArray()), ReleaseLocks.sha256(key.toByteArray()))
+            ReleasePrivateFiles.save(root.resolve("$operation.adoption.json"), json.encodeToString(record).toByteArray())
+            record
+        }
     fun read(operation: String): PrivatePkiIssue = ReleasePrivateFiles.locked(root) {
         require(operationPattern.matches(operation))
         val record = json.decodeFromString<PrivatePkiIssue>(ReleasePrivateFiles.read(root.resolve("$operation.json")).decodeToString())

@@ -67,7 +67,8 @@ internal class QualifiedActivationAuthorization(private val evidence: Activation
     private val transactionJournal: Path, private val consumptionRoot: Path,
     private val controllerRoot: Path, private val verifyController: () -> Unit,
     private val observeLive: (ReleaseDeploymentBinding, JsonObject) -> Unit,
-    private val process: AcceptanceControllerProcess) : ReleaseActivationAuthorization {
+    private val process: AcceptanceControllerProcess,
+    private val activeSite: ActiveSiteRegistry? = null) : ReleaseActiveSiteAuthorization {
     companion object {
         private val json = Json { encodeDefaults = true; ignoreUnknownKeys = false }
         private val hash = Regex("[a-f0-9]{64}")
@@ -84,7 +85,7 @@ internal class QualifiedActivationAuthorization(private val evidence: Activation
             }
         }
         fun real(evidence: ActivationEvidenceBinding, transactionJournal: Path, consumptionRoot: Path,
-            caddy: TransactionalCaddy): QualifiedActivationAuthorization {
+            caddy: TransactionalCaddy, activeSite: ActiveSiteRegistry? = null): QualifiedActivationAuthorization {
             require(hash.matches(evidence.acceptanceControllerSha256) &&
                 consumptionRoot == Path.of("/mnt/media/p0-v3/release-activation-consumptions")) { "Canonical activation consumption namespace required" }
             val controller = Path.of("/mnt/media/p0-v3/runtime-supervision/acceptance-releases/${evidence.acceptanceControllerSha256}")
@@ -97,7 +98,7 @@ internal class QualifiedActivationAuthorization(private val evidence: Activation
                     val images = closure(evidence.artifacts).images.values.map { it.reference to it.imageId }.toSet()
                     val upstreams = GenerationRuntime.real().checkActivationSource(deployment, candidate, images)
                     require(caddy.observeRestrictedSlotSha256(deployment.generationId, upstreams) == deployment.restrictedConfigurationSha256) { "Restricted Caddy binding changed before activation" }
-                }, LocalAcceptanceControllerProcess())
+                }, LocalAcceptanceControllerProcess(), activeSite)
         }
     }
     private fun candidate(): JsonObject {
@@ -157,6 +158,12 @@ internal class QualifiedActivationAuthorization(private val evidence: Activation
     }
     override fun verify(binding: ReleaseActivationBinding): String {
         admission(binding)
+        if (TransactionJournal.verify(transactionJournal).last().update != null)
+            requireNotNull(activeSite) { "Owned activation requires global active-site authority" }.admitOriginal(binding.deployment)
+        else activeSite?.admitFresh(binding.deployment)
+        // The pure permit verifier remains usable without a registry for historical source
+        // fixtures; ReleaseTransaction.activate always requires the typed site selector and
+        // production ReleaseDispatch always supplies realFresh or an original site actor.
         return verifyPermit(call("activation-verify", binding), binding)
     }
     override fun consume(binding: ReleaseActivationBinding, permitSha256: String, activationJournalHead: String) {
@@ -176,4 +183,11 @@ internal class QualifiedActivationAuthorization(private val evidence: Activation
         require(retained.getValue("consumption") == expected && retained.getValue("claimJournal") == JsonPrimitive(claim.decodeToString()) &&
             verifyPermit(retained.getValue("permit").jsonObject, binding) == permitSha256) { "Activation consumption was not durably retained" }
     }
+    override fun select(binding: ReleaseActivationBinding, permitSha256: String,
+        activationJournalHead: String, qualificationSnapshotId: String): String =
+        requireNotNull(activeSite) { "Original site registry not independently bootstrapped" }
+            .select(binding, permitSha256, activationJournalHead, qualificationSnapshotId)
+    override fun finalize(binding: ReleaseActivationBinding, committed: JournalRecord, selectionSha256: String) =
+        requireNotNull(activeSite) { "Owned active site selection is missing" }
+            .finalize(binding, committed, selectionSha256)
 }

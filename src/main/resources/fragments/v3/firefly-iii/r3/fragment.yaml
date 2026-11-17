@@ -1,0 +1,1012 @@
+{
+  "schemaVersion": 2,
+  "id": "private-firefly-iii",
+  "revision": 3,
+  "product": "firefly-iii",
+  "artifacts": [
+    "postgres",
+    "firefly-iii",
+    "caddy",
+    "firefly-importer",
+    "firefly-sso"
+  ],
+  "providers": [
+    "postgres",
+    "caddy",
+    "keycloak"
+  ],
+  "networks": [
+    "db-admin",
+    "firefly-data",
+    "firefly-web",
+    "ingress-control",
+    "firefly-importer-web",
+    "finance-api",
+    "identity-web"
+  ],
+  "providerNetworks": {
+    "postgres": [
+      "firefly-data"
+    ],
+    "caddy": [
+      "ingress-control"
+    ],
+    "keycloak": [
+      "identity-web"
+    ]
+  },
+  "providerProcesses": {
+    "postgres": [
+      "postgres"
+    ],
+    "caddy": [
+      "caddy"
+    ],
+    "keycloak": [
+      "keycloak"
+    ]
+  },
+  "webNetworks": [
+    "firefly-web",
+    "firefly-importer-web"
+  ],
+  "volumes": [
+    {
+      "id": "firefly-storage",
+      "userId": 33
+    },
+    {
+      "id": "firefly-cache",
+      "userId": 33
+    },
+    {
+      "id": "firefly-importer-storage",
+      "userId": 33
+    }
+  ],
+  "inputs": [
+    {
+      "name": "postgres-ca.pem",
+      "owner": "postgres",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-db-init",
+        "firefly-db-finalize"
+      ]
+    },
+    {
+      "name": "firefly-db-admin.env",
+      "owner": "firefly-iii",
+      "purpose": "BOOTSTRAP",
+      "consumers": [
+        "firefly-db-init",
+        "firefly-db-finalize"
+      ]
+    },
+    {
+      "name": "firefly-db-ca.pem",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-files-init",
+        "firefly-migrate",
+        "firefly-php",
+        "firefly-users-init",
+        "firefly-runtime-config"
+      ]
+    },
+    {
+      "name": "firefly-runtime.env",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-files-init",
+        "firefly-php",
+        "firefly-runtime-config"
+      ]
+    },
+    {
+      "name": "firefly-migration.env",
+      "owner": "firefly-iii",
+      "purpose": "BOOTSTRAP",
+      "consumers": [
+        "firefly-migrate"
+      ]
+    },
+    {
+      "name": "firefly-fpm.conf",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-php",
+        "firefly-runtime-config"
+      ]
+    },
+    {
+      "name": "firefly-health.php",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-php",
+        "firefly-runtime-config"
+      ]
+    },
+    {
+      "name": "firefly-nginx.conf",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly"
+      ]
+    },
+    {
+      "name": "firefly-users.php",
+      "owner": "firefly-iii",
+      "purpose": "BOOTSTRAP",
+      "consumers": [
+        "firefly-users-init"
+      ]
+    },
+    {
+      "name": "firefly-onboarding.env",
+      "owner": "firefly-iii",
+      "purpose": "BOOTSTRAP",
+      "consumers": [
+        "firefly-users-init"
+      ]
+    },
+    {
+      "name": "finance-native-api.caddyfile",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-native-api"
+      ]
+    },
+    {
+      "name": "firefly-sso.env",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-sso"
+      ]
+    },
+    {
+      "name": "firefly-importer-sso.env",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-importer-sso"
+      ]
+    },
+    {
+      "name": "identity-ca.pem",
+      "owner": "keycloak",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-sso",
+        "firefly-importer-sso"
+      ]
+    },
+    {
+      "name": "firefly-importer.env",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-importer",
+        "firefly-importer-files-init"
+      ]
+    },
+    {
+      "name": "finance-bootstrap-app.php",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-importer"
+      ]
+    },
+    {
+      "name": "finance-importersubjects.php",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-importer"
+      ]
+    },
+    {
+      "name": "finance-manualfilepolicy.php",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-importer"
+      ]
+    },
+    {
+      "name": "finance-subjectboundary.php",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-importer"
+      ]
+    },
+    {
+      "name": "finance-importjobrepository.php",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-importer"
+      ]
+    },
+    {
+      "name": "finance-webindexcontroller.php",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-importer"
+      ]
+    },
+    {
+      "name": "finance-apiimportjobscontroller.php",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-importer"
+      ]
+    },
+    {
+      "name": "finance-importer.php",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-importer"
+      ]
+    },
+    {
+      "name": "finance-initialize-policy.php",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-importer"
+      ]
+    },
+    {
+      "name": "finance-bootstrap-hook.sh",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-importer"
+      ]
+    },
+    {
+      "name": "finance-core-apisubjectboundary.php",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-migrate",
+        "firefly-php",
+        "firefly-users-init",
+        "firefly-runtime-config"
+      ]
+    },
+    {
+      "name": "finance-core-authserviceprovider.php",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-migrate",
+        "firefly-php",
+        "firefly-users-init",
+        "firefly-runtime-config"
+      ]
+    },
+    {
+      "name": "finance-core-session.php",
+      "owner": "firefly-iii",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "firefly-migrate",
+        "firefly-php",
+        "firefly-users-init",
+        "firefly-runtime-config"
+      ]
+    }
+  ],
+  "processes": [
+    {
+      "id": "firefly-db-init",
+      "artifact": "postgres",
+      "userId": 999,
+      "entrypoint": "/bin/sh",
+      "command": [
+        "-ec",
+        "psql -X -v ON_ERROR_STOP=1 <<SQL\nCREATE ROLE firefly_migration LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '$FIREFLY_MIGRATION_PASSWORD';\nCREATE ROLE firefly_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '$FIREFLY_RUNTIME_PASSWORD';\nCREATE DATABASE firefly OWNER firefly_migration;\nREVOKE ALL ON DATABASE firefly FROM PUBLIC;\nGRANT CONNECT ON DATABASE firefly TO firefly_runtime;\nSQL\npsql -X -d firefly -v ON_ERROR_STOP=1 <<'SQL'\nREVOKE CREATE ON SCHEMA public FROM PUBLIC;\nGRANT USAGE ON SCHEMA public TO firefly_runtime;\nALTER DEFAULT PRIVILEGES FOR ROLE firefly_migration IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO firefly_runtime;\nALTER DEFAULT PRIVILEGES FOR ROLE firefly_migration IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO firefly_runtime;\nSQL"
+      ],
+      "environmentFile": "firefly-db-admin.env",
+      "files": [
+        {
+          "file": "postgres-ca.pem",
+          "target": "/run/secrets/postgres-ca.pem"
+        }
+      ],
+      "oneShot": true,
+      "networks": [
+        "db-admin"
+      ]
+    },
+    {
+      "id": "firefly-db-finalize",
+      "artifact": "postgres",
+      "userId": 999,
+      "entrypoint": "/bin/sh",
+      "command": [
+        "-ec",
+        "psql -X -d firefly -v ON_ERROR_STOP=1 <<'SQL'\nGRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO firefly_runtime;\nGRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO firefly_runtime;\nALTER ROLE firefly_migration NOLOGIN;\nSQL"
+      ],
+      "environmentFile": "firefly-db-admin.env",
+      "files": [
+        {
+          "file": "postgres-ca.pem",
+          "target": "/run/secrets/postgres-ca.pem"
+        }
+      ],
+      "oneShot": true,
+      "networks": [
+        "db-admin"
+      ]
+    },
+    {
+      "id": "firefly-files-init",
+      "artifact": "firefly-iii",
+      "userId": 33,
+      "entrypoint": "/bin/sh",
+      "command": [
+        "-ec",
+        "cp -R /var/www/html/storage/. /seed/storage/; cp -R /var/www/html/bootstrap/cache/. /seed/cache/"
+      ],
+      "environmentFile": "firefly-runtime.env",
+      "volumes": [
+        {
+          "volume": "firefly-storage",
+          "target": "/seed/storage"
+        },
+        {
+          "volume": "firefly-cache",
+          "target": "/seed/cache"
+        }
+      ],
+      "files": [
+        {
+          "file": "firefly-db-ca.pem",
+          "target": "/run/secrets/firefly-db-ca.pem"
+        }
+      ],
+      "oneShot": true,
+      "memoryMiB": 1024,
+      "networks": [
+        "firefly-data"
+      ]
+    },
+    {
+      "id": "firefly-migrate",
+      "artifact": "firefly-iii",
+      "userId": 33,
+      "entrypoint": "/bin/sh",
+      "command": [
+        "-ec",
+        "php artisan config:clear --no-interaction\nphp artisan migrate --seed --force --no-interaction\nphp artisan firefly-iii:upgrade-database --no-interaction\nphp artisan firefly-iii:laravel-passport-keys --no-interaction\ntest -s storage/oauth-private.key; test -s storage/oauth-public.key\nchmod 600 storage/oauth-private.key storage/oauth-public.key\nphp artisan config:clear --no-interaction"
+      ],
+      "environmentFile": "firefly-migration.env",
+      "volumes": [
+        {
+          "volume": "firefly-storage",
+          "target": "/var/www/html/storage"
+        },
+        {
+          "volume": "firefly-cache",
+          "target": "/var/www/html/bootstrap/cache"
+        }
+      ],
+      "files": [
+        {
+          "file": "firefly-db-ca.pem",
+          "target": "/run/secrets/firefly-db-ca.pem"
+        },
+        {
+          "file": "finance-core-apisubjectboundary.php",
+          "target": "/opt/firefly/ApiSubjectBoundary.php"
+        },
+        {
+          "file": "finance-core-authserviceprovider.php",
+          "target": "/var/www/html/app/Providers/AuthServiceProvider.php"
+        },
+        {
+          "file": "finance-core-session.php",
+          "target": "/var/www/html/config/session.php"
+        }
+      ],
+      "oneShot": true,
+      "memoryMiB": 1024,
+      "networks": [
+        "firefly-data"
+      ]
+    },
+    {
+      "id": "firefly-php",
+      "artifact": "firefly-iii",
+      "userId": 33,
+      "entrypoint": "/usr/local/sbin/php-fpm",
+      "command": [
+        "--nodaemonize",
+        "--fpm-config",
+        "/run/secrets/fpm.conf"
+      ],
+      "environmentFile": "firefly-runtime.env",
+      "volumes": [
+        {
+          "volume": "firefly-storage",
+          "target": "/var/www/html/storage"
+        },
+        {
+          "volume": "firefly-cache",
+          "target": "/var/www/html/bootstrap/cache"
+        }
+      ],
+      "files": [
+        {
+          "file": "firefly-fpm.conf",
+          "target": "/run/secrets/fpm.conf"
+        },
+        {
+          "file": "firefly-health.php",
+          "target": "/run/secrets/health.php"
+        },
+        {
+          "file": "firefly-db-ca.pem",
+          "target": "/run/secrets/firefly-db-ca.pem"
+        },
+        {
+          "file": "finance-core-apisubjectboundary.php",
+          "target": "/opt/firefly/ApiSubjectBoundary.php"
+        },
+        {
+          "file": "finance-core-authserviceprovider.php",
+          "target": "/var/www/html/app/Providers/AuthServiceProvider.php"
+        },
+        {
+          "file": "finance-core-session.php",
+          "target": "/var/www/html/config/session.php"
+        }
+      ],
+      "readiness": [
+        "/usr/local/bin/php",
+        "-r",
+        "$s=fsockopen('127.0.0.1',9000,$e,$m,3); if(!$s)exit(1); fclose($s);"
+      ],
+      "memoryMiB": 1024,
+      "networks": [
+        "firefly-data",
+        "firefly-web"
+      ]
+    },
+    {
+      "id": "firefly",
+      "artifact": "firefly-iii",
+      "userId": 33,
+      "entrypoint": "/usr/sbin/nginx",
+      "command": [
+        "-e",
+        "/tmp/nginx-error.log",
+        "-c",
+        "/run/secrets/nginx.conf",
+        "-g",
+        "daemon off;"
+      ],
+      "files": [
+        {
+          "file": "firefly-nginx.conf",
+          "target": "/run/secrets/nginx.conf"
+        }
+      ],
+      "memoryMiB": 256,
+      "readinessHttpPort": 8080,
+      "readinessHttpPath": "/healthz",
+      "networks": [
+        "firefly-web",
+        "ingress-control"
+      ]
+    },
+    {
+      "id": "firefly-users-init",
+      "artifact": "firefly-iii",
+      "userId": 33,
+      "entrypoint": "/usr/local/bin/php",
+      "command": [
+        "/run/secrets/firefly-users.php"
+      ],
+      "environmentFile": "firefly-onboarding.env",
+      "volumes": [
+        {
+          "volume": "firefly-storage",
+          "target": "/var/www/html/storage"
+        },
+        {
+          "volume": "firefly-cache",
+          "target": "/var/www/html/bootstrap/cache"
+        }
+      ],
+      "files": [
+        {
+          "file": "firefly-users.php",
+          "target": "/run/secrets/firefly-users.php"
+        },
+        {
+          "file": "firefly-db-ca.pem",
+          "target": "/run/secrets/firefly-db-ca.pem"
+        },
+        {
+          "file": "finance-core-apisubjectboundary.php",
+          "target": "/opt/firefly/ApiSubjectBoundary.php"
+        },
+        {
+          "file": "finance-core-authserviceprovider.php",
+          "target": "/var/www/html/app/Providers/AuthServiceProvider.php"
+        },
+        {
+          "file": "finance-core-session.php",
+          "target": "/var/www/html/config/session.php"
+        }
+      ],
+      "oneShot": true,
+      "memoryMiB": 1024,
+      "networks": [
+        "firefly-data"
+      ]
+    },
+    {
+      "id": "firefly-runtime-config",
+      "artifact": "firefly-iii",
+      "userId": 33,
+      "entrypoint": "/bin/sh",
+      "command": [
+        "-ec",
+        "php artisan config:cache --no-interaction"
+      ],
+      "environmentFile": "firefly-runtime.env",
+      "volumes": [
+        {
+          "volume": "firefly-storage",
+          "target": "/var/www/html/storage"
+        },
+        {
+          "volume": "firefly-cache",
+          "target": "/var/www/html/bootstrap/cache"
+        }
+      ],
+      "files": [
+        {
+          "file": "firefly-fpm.conf",
+          "target": "/run/secrets/fpm.conf"
+        },
+        {
+          "file": "firefly-health.php",
+          "target": "/run/secrets/health.php"
+        },
+        {
+          "file": "firefly-db-ca.pem",
+          "target": "/run/secrets/firefly-db-ca.pem"
+        },
+        {
+          "file": "finance-core-apisubjectboundary.php",
+          "target": "/opt/firefly/ApiSubjectBoundary.php"
+        },
+        {
+          "file": "finance-core-authserviceprovider.php",
+          "target": "/var/www/html/app/Providers/AuthServiceProvider.php"
+        },
+        {
+          "file": "finance-core-session.php",
+          "target": "/var/www/html/config/session.php"
+        }
+      ],
+      "oneShot": true,
+      "memoryMiB": 1024,
+      "networks": [
+        "firefly-data"
+      ]
+    },
+    {
+      "id": "firefly-native-api",
+      "artifact": "caddy",
+      "userId": 1000,
+      "memoryMiB": 256,
+      "networks": [
+        "firefly-web",
+        "finance-api"
+      ],
+      "entrypoint": "/usr/bin/caddy",
+      "command": [
+        "run",
+        "--config",
+        "/run/secrets/finance-native-api.caddyfile",
+        "--adapter",
+        "caddyfile"
+      ],
+      "files": [
+        {
+          "file": "finance-native-api.caddyfile",
+          "target": "/run/secrets/finance-native-api.caddyfile"
+        }
+      ],
+      "readinessHttpPort": 8081,
+      "readinessHttpPath": "/healthz"
+    },
+    {
+      "id": "firefly-importer-files-init",
+      "artifact": "firefly-importer",
+      "userId": 33,
+      "oneShot": true,
+      "entrypoint": "/bin/sh",
+      "command": [
+        "-ec",
+        "cp -R /var/www/html/storage/. /seed/storage/"
+      ],
+      "environmentFile": "firefly-importer.env",
+      "volumes": [
+        {
+          "volume": "firefly-importer-storage",
+          "target": "/seed/storage"
+        }
+      ],
+      "memoryMiB": 512,
+      "networks": [
+        "firefly-importer-web"
+      ]
+    },
+    {
+      "id": "firefly-importer",
+      "artifact": "firefly-importer",
+      "userId": 33,
+      "entrypoint": "/usr/local/bin/docker-php-serversideup-entrypoint",
+      "command": [
+        "/init"
+      ],
+      "environmentFile": "firefly-importer.env",
+      "volumes": [
+        {
+          "volume": "firefly-importer-storage",
+          "target": "/var/www/html/storage"
+        }
+      ],
+      "files": [
+        {
+          "file": "finance-bootstrap-app.php",
+          "target": "/var/www/html/bootstrap/app.php"
+        },
+        {
+          "file": "finance-importersubjects.php",
+          "target": "/opt/firefly-importer/ImporterSubjects.php"
+        },
+        {
+          "file": "finance-manualfilepolicy.php",
+          "target": "/opt/firefly-importer/ManualFilePolicy.php"
+        },
+        {
+          "file": "finance-subjectboundary.php",
+          "target": "/opt/firefly-importer/SubjectBoundary.php"
+        },
+        {
+          "file": "finance-importjobrepository.php",
+          "target": "/var/www/html/app/Repository/ImportJob/ImportJobRepository.php"
+        },
+        {
+          "file": "finance-webindexcontroller.php",
+          "target": "/var/www/html/app/Http/Controllers/IndexController.php"
+        },
+        {
+          "file": "finance-apiimportjobscontroller.php",
+          "target": "/var/www/html/app/Api/Controllers/ImportJob/IndexController.php"
+        },
+        {
+          "file": "finance-importer.php",
+          "target": "/var/www/html/config/importer.php"
+        },
+        {
+          "file": "finance-initialize-policy.php",
+          "target": "/opt/firefly-importer/initialize-policy.php"
+        },
+        {
+          "file": "finance-bootstrap-hook.sh",
+          "target": "/etc/entrypoint.d/11-execute-things.sh"
+        }
+      ],
+      "memoryMiB": 1024,
+      "readinessHttpPort": 8080,
+      "readinessHttpPath": "/health",
+      "networks": [
+        "firefly-importer-web",
+        "finance-api"
+      ]
+    },
+    {
+      "id": "firefly-sso",
+      "artifact": "firefly-sso",
+      "userId": 65532,
+      "groupId": 65532,
+      "entrypoint": "/bin/oauth2-proxy",
+      "command": [],
+      "environmentFile": "firefly-sso.env",
+      "files": [
+        {
+          "file": "identity-ca.pem",
+          "target": "/run/secrets/identity-ca.pem"
+        }
+      ],
+      "memoryMiB": 256,
+      "readinessHttpPort": 4180,
+      "readinessHttpPath": "/ready",
+      "networks": [
+        "firefly-web",
+        "identity-web"
+      ]
+    },
+    {
+      "id": "firefly-importer-sso",
+      "artifact": "firefly-sso",
+      "userId": 65532,
+      "groupId": 65532,
+      "entrypoint": "/bin/oauth2-proxy",
+      "command": [],
+      "environmentFile": "firefly-importer-sso.env",
+      "files": [
+        {
+          "file": "identity-ca.pem",
+          "target": "/run/secrets/identity-ca.pem"
+        }
+      ],
+      "memoryMiB": 256,
+      "readinessHttpPort": 4180,
+      "readinessHttpPath": "/ready",
+      "networks": [
+        "firefly-importer-web",
+        "identity-web"
+      ]
+    }
+  ],
+  "install": {
+    "processes": [
+      "firefly-db-init",
+      "firefly-db-finalize",
+      "firefly-files-init",
+      "firefly-migrate",
+      "firefly-php",
+      "firefly",
+      "firefly-users-init",
+      "firefly-runtime-config",
+      "firefly-native-api",
+      "firefly-importer-files-init",
+      "firefly-importer",
+      "firefly-sso",
+      "firefly-importer-sso"
+    ],
+    "dependencies": {
+      "firefly-db-init": [
+        "postgres"
+      ],
+      "firefly-db-finalize": [
+        "firefly-runtime-config"
+      ],
+      "firefly-files-init": [],
+      "firefly-migrate": [
+        "firefly-db-init",
+        "firefly-files-init"
+      ],
+      "firefly-php": [
+        "postgres",
+        "firefly-db-finalize"
+      ],
+      "firefly": [
+        "firefly-php",
+        "caddy"
+      ],
+      "firefly-users-init": [
+        "firefly-migrate"
+      ],
+      "firefly-runtime-config": [
+        "firefly-users-init"
+      ],
+      "firefly-native-api": [
+        "firefly"
+      ],
+      "firefly-importer-files-init": [],
+      "firefly-importer": [
+        "firefly-importer-files-init",
+        "firefly-native-api"
+      ],
+      "firefly-sso": [
+        "firefly",
+        "keycloak"
+      ],
+      "firefly-importer-sso": [
+        "firefly-importer",
+        "keycloak"
+      ]
+    },
+    "databaseAccess": [
+      {
+        "consumer": "firefly-files-init",
+        "provider": "postgres",
+        "volume": "postgres",
+        "database": "firefly",
+        "principal": "firefly_runtime",
+        "credentialFile": "firefly-runtime.env",
+        "network": "firefly-data"
+      },
+      {
+        "consumer": "firefly-migrate",
+        "provider": "postgres",
+        "volume": "postgres",
+        "database": "firefly",
+        "principal": "firefly_migration",
+        "credentialFile": "firefly-migration.env",
+        "network": "firefly-data"
+      },
+      {
+        "consumer": "firefly-php",
+        "provider": "postgres",
+        "volume": "postgres",
+        "database": "firefly",
+        "principal": "firefly_runtime",
+        "credentialFile": "firefly-runtime.env",
+        "network": "firefly-data"
+      },
+      {
+        "consumer": "firefly-users-init",
+        "provider": "postgres",
+        "volume": "postgres",
+        "database": "firefly",
+        "principal": "firefly_migration",
+        "credentialFile": "firefly-onboarding.env",
+        "network": "firefly-data"
+      },
+      {
+        "consumer": "firefly-runtime-config",
+        "provider": "postgres",
+        "volume": "postgres",
+        "database": "firefly",
+        "principal": "firefly_runtime",
+        "credentialFile": "firefly-runtime.env",
+        "network": "firefly-data"
+      }
+    ]
+  },
+  "restore": {
+    "processes": [
+      "firefly-php",
+      "firefly",
+      "firefly-native-api",
+      "firefly-importer",
+      "firefly-sso",
+      "firefly-importer-sso"
+    ],
+    "dependencies": {
+      "firefly-php": [
+        "postgres"
+      ],
+      "firefly": [
+        "firefly-php",
+        "caddy"
+      ],
+      "firefly-native-api": [
+        "firefly"
+      ],
+      "firefly-importer": [
+        "firefly-native-api"
+      ],
+      "firefly-sso": [
+        "firefly",
+        "keycloak"
+      ],
+      "firefly-importer-sso": [
+        "firefly-importer",
+        "keycloak"
+      ]
+    },
+    "databaseAccess": [
+      {
+        "consumer": "firefly-php",
+        "provider": "postgres",
+        "volume": "postgres",
+        "database": "firefly",
+        "principal": "firefly_runtime",
+        "credentialFile": "firefly-runtime.env",
+        "network": "firefly-data"
+      }
+    ]
+  },
+  "templates": [
+    {
+      "output": "finance-native-api.caddyfile",
+      "resource": "native-api.caddyfile",
+      "format": "LITERAL",
+      "parameters": {}
+    },
+    {
+      "output": "finance-bootstrap-app.php",
+      "resource": "bootstrap-app.php",
+      "format": "LITERAL",
+      "parameters": {}
+    },
+    {
+      "output": "finance-importersubjects.php",
+      "resource": "importersubjects.php",
+      "format": "LITERAL",
+      "parameters": {}
+    },
+    {
+      "output": "finance-manualfilepolicy.php",
+      "resource": "manualfilepolicy.php",
+      "format": "LITERAL",
+      "parameters": {}
+    },
+    {
+      "output": "finance-subjectboundary.php",
+      "resource": "subjectboundary.php",
+      "format": "LITERAL",
+      "parameters": {}
+    },
+    {
+      "output": "finance-importjobrepository.php",
+      "resource": "importjobrepository.php",
+      "format": "LITERAL",
+      "parameters": {}
+    },
+    {
+      "output": "finance-webindexcontroller.php",
+      "resource": "webindexcontroller.php",
+      "format": "LITERAL",
+      "parameters": {}
+    },
+    {
+      "output": "finance-apiimportjobscontroller.php",
+      "resource": "apiimportjobscontroller.php",
+      "format": "LITERAL",
+      "parameters": {}
+    },
+    {
+      "output": "finance-importer.php",
+      "resource": "importer.php",
+      "format": "LITERAL",
+      "parameters": {}
+    },
+    {
+      "output": "finance-initialize-policy.php",
+      "resource": "initialize-policy.php",
+      "format": "LITERAL",
+      "parameters": {}
+    },
+    {
+      "output": "finance-bootstrap-hook.sh",
+      "resource": "bootstrap-hook.sh",
+      "format": "LITERAL",
+      "parameters": {}
+    },
+    {
+      "output": "finance-core-apisubjectboundary.php",
+      "resource": "apisubjectboundary.php",
+      "format": "LITERAL",
+      "parameters": {}
+    },
+    {
+      "output": "finance-core-authserviceprovider.php",
+      "resource": "authserviceprovider.php",
+      "format": "LITERAL",
+      "parameters": {}
+    },
+    {
+      "output": "finance-core-session.php",
+      "resource": "session.php",
+      "format": "LITERAL",
+      "parameters": {}
+    }
+  ]
+}

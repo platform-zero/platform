@@ -1,10 +1,30 @@
 # Release controller status (controller incomplete; real candidate integration begun)
 
-## Current implementation-only phase
+## Current development state
 
-See [the current execution boundary and unfinished code work](implementation-only.md). Only source/build/unit-test work is authorized; native paragraphs below are historical checkpoints, not instructions to rerun probes. Old project-created fixtures are not permanently protected assets, and no cleanup is being performed now.
+[Rapid completion](rapid-completion.md) is the current authority and sole backlog. Direct builds,
+tests, acquisition and bounded runtime integration through two full qualification cycles are
+authorized, without subagents or coverage quotas. Public production cutover, historical RSS
+publication, broad cleanup and uncertain-effect replay remain unauthorized.
 
-Current source changes explicitly separate unit/native test tasks, bind fresh owned preparation to canonical-v2, preserve the original candidate across derived restore candidates, add whole-trial evidence evaluation, and separate restricted ACCEPTED staging from explicit single-use-authorized activation. The [concrete activation authority, transactional Caddy and RSS reconciliation adapters](activation-caddy-rss.md) are implemented and unit-tested. The typed production dispatcher and namespace-aware Caddy selection are now registered, and controller-owned restored startup is integrated. The complete canonical cohort, native owned-update lifecycle, restricted restore ingress and most genuine acceptance adapters remain unfinished. The manifest declares 57 targets/107 variants; declarations do not establish executable coverage. See [sole-operator implementation progress](implementation-completion.md). These changes are unit-tested, not runtime-qualified.
+Latest development verification: **726 Platform Kotlin tests**, **97 Acceptance Kotlin tests**,
+**24 Python native adapter/projection tests** and **4 Python spool tests** passed. The earlier
+eight lifecycle/RSS failures are resolved, not skipped. These are development checks, not
+complete native INSTALL/RESTORE qualification. **Qualification remains 0/2.**
+
+Restored release verification reopens original aggregate/case evidence; synthetic lifecycle
+fixtures remain unit-only. RSS consumption cannot fall back to bootstrap after an invalid
+retained record, and current-site authority is rechecked. Private observability now uses
+fixed owner actions, sealed target/TLS metadata and original-byte projections. Stable IDs
+prevent duplicate effects; bounded Alloy polling requires an acknowledged empty predecessor.
+Live service execution of this slice remains unverified.
+
+The producer trust anchor, bootstrap trust anchor and release-artifact catalog paths were
+absent at the latest host check. See [exact admission gaps](operator-blockers.md) and the
+[verification logs](rapid-completion.md#verification-record). Authentic signed inputs and
+remaining canonical/workflow integration are both needed; a supplied key alone is not readiness.
+
+Current source changes explicitly separate unit/native test tasks, bind fresh owned preparation to canonical-v2, preserve the original candidate across derived restore candidates, add whole-trial evidence evaluation, and separate restricted ACCEPTED staging from explicit single-use-authorized activation. The [concrete activation authority, transactional Caddy and RSS reconciliation adapters](activation-caddy-rss.md) are implemented and unit-tested. The typed production dispatcher and namespace-aware Caddy selection are now registered, and controller-owned restored startup is integrated. Complete canonical execution, native owned-update lifecycle, restored client integration and remaining acceptance workflows are unfinished; adapter source presence is not runtime proof. The manifest declares 57 targets/107 variants; declarations do not establish executable coverage. See [sole-operator implementation progress](implementation-completion.md). These changes are unit-tested, not runtime-qualified.
 
 The earlier core recovery chain did subsequently pass on the isolated canonical-v2 store; see the [corrected recovered-source history](recovered-source-backup.md). The incomplete tamper scope has not been reconciled in this phase.
 
@@ -13,6 +33,13 @@ The earlier core recovery chain did subsequently pass on the isolated canonical-
 The current [completion contract](completion-plan.md) is AI-led automated self-qualification with **no human approval gates and no subagents**. Failed tests may be diagnosed, repaired and rerun; failures and uncertain effects must not be erased or blindly replayed. The required two fresh full-stack install/restore cycles remain **0/2**.
 
 The controller now uses `ReleaseQualification`; the former `IndependentReleaseReview` is a deprecated compatibility interface, not a claim of independence. Candidate-bound qualification/correction policy, durable pending-attempt history and invocation-bound native assertion/evidence execution are implemented in acceptance. Real product runners and the live whole-release actuator still need integration. Public activation and RSS gates have not been bypassed.
+
+## Historical component checkpoints
+
+The following records preserve earlier artifact-bound results. Fleet/fence counts, command
+registration gaps and capsule behavior describe those checkpoints, not current host state or
+current admission. New-production backups use Kopia; historical capsule verification and
+extraction remain supported. None of these component results counts toward the final two cycles.
 
 A [live private-generation controller](private-generation-runtime.md) now stages actual dependency-ordered members with input/image/ownership audits, conservative capacity admission, immutable action history and linked stop/fence reconciliation. Three fresh five-service native engineering runs passed; six member deployments remain retained stopped/fenced. The latest also exercises under-lock pristine admission and linked isolation reconciliation. This does not register the complete `ReleaseEffects` backend, activate public services or count toward the full-stack 0/2 requirement.
 

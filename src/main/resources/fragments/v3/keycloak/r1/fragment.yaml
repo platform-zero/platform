@@ -1,0 +1,127 @@
+schemaVersion: 2
+id: identity-keycloak
+revision: 1
+product: keycloak
+artifacts: [keycloak, postgres-timescale]
+providers: [postgres]
+networks: [db-admin, keycloak-data, identity-web]
+providerNetworks:
+  postgres: [keycloak-data]
+webNetworks: [identity-web]
+volumes: []
+inputs:
+  - name: identity-db-admin.env
+    owner: keycloak
+    purpose: BOOTSTRAP
+    consumers: [identity-db-init, identity-db-finalize]
+  - name: postgres-ca.pem
+    owner: postgres
+    purpose: RUNTIME
+    consumers: [identity-db-init, identity-realm-init, identity-db-finalize, keycloak]
+  - name: identity-migration.env
+    owner: keycloak
+    purpose: BOOTSTRAP
+    consumers: [identity-realm-init]
+  - name: identity-realm.json
+    owner: keycloak
+    purpose: BOOTSTRAP
+    consumers: [identity-realm-init]
+  - name: identity-runtime.env
+    owner: keycloak
+    purpose: RUNTIME
+    consumers: [keycloak]
+  - name: identity-ca.pem
+    owner: keycloak
+    purpose: RUNTIME
+    consumers: [keycloak]
+  - name: identity-web.pem
+    owner: keycloak
+    purpose: RUNTIME
+    consumers: [keycloak]
+  - name: identity-web-key.pem
+    owner: keycloak
+    purpose: RUNTIME
+    consumers: [keycloak]
+processes:
+  - id: identity-db-init
+    artifact: postgres-timescale
+    userId: 999
+    oneShot: true
+    entrypoint: /bin/sh
+    environmentFile: identity-db-admin.env
+    networks: [db-admin]
+    files:
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+    command:
+      - -ec
+      - |
+        psql -X -v ON_ERROR_STOP=1 <<SQL
+        CREATE ROLE keycloak_migrate LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '$KEYCLOAK_MIGRATION_PASSWORD';
+        CREATE ROLE keycloak LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '$KEYCLOAK_PASSWORD';
+        CREATE DATABASE keycloak OWNER keycloak_migrate;
+        REVOKE ALL ON DATABASE keycloak FROM PUBLIC;
+        GRANT CONNECT ON DATABASE keycloak TO keycloak;
+        SQL
+  - id: identity-realm-init
+    artifact: keycloak
+    userId: 1000
+    groupId: 0
+    oneShot: true
+    memoryMiB: 1024
+    environmentFile: identity-migration.env
+    command: [import, --optimized, --file=/run/secrets/identity-realm.json]
+    networks: [keycloak-data]
+    files:
+      - {file: identity-realm.json, target: /run/secrets/identity-realm.json}
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+    tmpfs: [/tmp, /opt/keycloak/data]
+  - id: identity-db-finalize
+    artifact: postgres-timescale
+    userId: 999
+    oneShot: true
+    entrypoint: /bin/sh
+    environmentFile: identity-db-admin.env
+    networks: [db-admin]
+    files:
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+    command:
+      - -ec
+      - |
+        psql -X -d keycloak -v ON_ERROR_STOP=1 <<'SQL'
+        REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+        GRANT USAGE ON SCHEMA public TO keycloak;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO keycloak;
+        GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO keycloak;
+        ALTER ROLE keycloak_migrate NOLOGIN;
+        SQL
+  - id: keycloak
+    artifact: keycloak
+    userId: 1000
+    groupId: 0
+    memoryMiB: 1024
+    environmentFile: identity-runtime.env
+    command: [start, --optimized, --spi-connections-jpa--quarkus--migration-strategy=validate]
+    networks: [keycloak-data, identity-web]
+    files:
+      - {file: identity-ca.pem, target: /run/secrets/identity-ca.pem}
+      - {file: identity-web.pem, target: /run/secrets/identity-web.pem}
+      - {file: identity-web-key.pem, target: /run/secrets/identity-web-key.pem}
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+    tmpfs: [/tmp, /opt/keycloak/data]
+    readiness: [/bin/bash, -ec, "exec 3<>/dev/tcp/127.0.0.1/9000; printf 'GET /health/ready HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3; read -r -t 3 line <&3; [[ \"$line\" == *' 200 '* ]]" ]
+install:
+  processes: [identity-db-init, identity-realm-init, identity-db-finalize, keycloak]
+  dependencies:
+    identity-db-init: [postgres]
+    identity-realm-init: [identity-db-init]
+    identity-db-finalize: [identity-realm-init]
+    keycloak: [identity-db-finalize]
+  databaseAccess:
+    - {consumer: identity-realm-init, provider: postgres, volume: postgres, database: keycloak, principal: keycloak_migrate, credentialFile: identity-migration.env, network: keycloak-data}
+    - {consumer: keycloak, provider: postgres, volume: postgres, database: keycloak, principal: keycloak, credentialFile: identity-runtime.env, network: keycloak-data}
+restore:
+  processes: [keycloak]
+  dependencies:
+    keycloak: [postgres]
+  databaseAccess:
+    - {consumer: keycloak, provider: postgres, volume: postgres, database: keycloak, principal: keycloak, credentialFile: identity-runtime.env, network: keycloak-data}

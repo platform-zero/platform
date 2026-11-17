@@ -1,0 +1,36 @@
+schemaVersion: 2
+id: private-donetick
+revision: 1
+product: donetick
+artifacts: [donetick]
+providers: [caddy]
+networks: [donetick-web]
+providerNetworks:
+  caddy: [donetick-web]
+webNetworks: [donetick-web]
+volumes:
+  - {id: donetick-data, userId: 1000}
+inputs:
+  - {name: donetick-runtime.env, owner: donetick, purpose: RUNTIME, consumers: [donetick]}
+  - {name: donetick-selfhosted.yaml, owner: donetick, purpose: RUNTIME, consumers: [donetick]}
+processes:
+  - id: donetick
+    artifact: donetick
+    userId: 1000
+    memoryMiB: 512
+    networks: [donetick-web]
+    entrypoint: /donetick
+    environmentFile: donetick-runtime.env
+    files:
+      - {file: donetick-selfhosted.yaml, target: /config/selfhosted.yaml}
+    volumes:
+      - {volume: donetick-data, target: /donetick-data}
+    readinessHttpPort: 2021
+install:
+  processes: [donetick]
+  dependencies:
+    donetick: [caddy]
+restore:
+  processes: [donetick]
+  dependencies:
+    donetick: [caddy]

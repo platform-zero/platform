@@ -44,6 +44,7 @@ class GenerationReleaseEffectsTest {
         override fun isolateCandidate() = call("isolate")
         override fun restorePrevious(snapshot: String) = call("restore-previous")
         override fun verifyPrevious() = call("verify-previous")
+        override fun retireOwnedAfterRollback() = call("retire-owned-rollback")
         override fun qualificationSnapshot(): String { call("qualification-snapshot"); return "cap-222222222222" }
     }
     private fun fixture(action: (Path, Transport, Control, GenerationReleaseEffects, MutableList<String>) -> Unit) {
@@ -63,6 +64,10 @@ class GenerationReleaseEffectsTest {
                 object : ReleasePublicationControl {
                     override fun pause() { publication += "pause" }
                     override fun release() { publication += "release" }
+                    override fun completeOwnedRollback() {
+                        assertEquals("verify-previous", control.calls.last())
+                        publication += "complete-owned-rollback"
+                    }
                 }, caddy)
             action(effectsRoot, transport, control, effects, publication)
         } finally { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
@@ -76,7 +81,8 @@ class GenerationReleaseEffectsTest {
         effects.openPublicWrites(); effects.releaseOutbound()
         effects.restrictPublicWritesToAcceptance(); effects.pauseOutbound(); effects.isolateCandidate()
         effects.restoreOldSnapshot(cap); effects.verifyOldStack()
-        assertEquals(listOf("pause", "release", "pause"), publication)
+        assertEquals(listOf("pause", "release", "pause", "complete-owned-rollback"), publication)
+        assertEquals(listOf("verify-previous", "retire-owned-rollback"), control.calls.takeLast(2))
         assertTrue("resume-restricted" in control.calls)
         for (name in listOf("stage", "readiness", "freeze", "capture", "restore-test", "migrate", "restrict", "cutover", "open-writes", "outbound", "isolate")) {
             assertTrue(Files.exists(root.resolve("$name.intent.json"))); assertTrue(Files.exists(root.resolve("$name.result.json")))

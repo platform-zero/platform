@@ -19,6 +19,21 @@ internal object CaddyRuntime {
                 readiness = listOf("/usr/bin/wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"))),
             networks = listOf("ingress-control")).also { PrivateDeployment.validate(it) }
     }
+    /** Idempotent post-composition attachment to app-owned frontend networks only. Does not create
+     * a host route or attach Caddy to SQL/admin, scheduler or unrelated networks. */
+    fun withFrontendNetworks(spec: PrivateDeploymentSpec, webNetworks: Set<String>): PrivateDeploymentSpec {
+        PrivateDeployment.validate(spec)
+        require(webNetworks.size <= 64 && webNetworks.all { network ->
+            network in spec.networks && network.endsWith("-web") && network != "ingress-egress" &&
+                network != "ingress-control" && network.matches(Regex("[a-z][a-z0-9-]{0,39}")) &&
+                spec.processes.any { it.id != "caddy" && network in it.networks }
+        }) { "Caddy may join only explicit application frontend networks" }
+        require(spec.processes.count { it.id == "caddy" } == 1)
+        return spec.copy(processes = spec.processes.map { process ->
+            if (process.id == "caddy") process.copy(networks = (process.networks + webNetworks.sorted()).distinct()) else process
+        }).also { PrivateDeployment.validate(it) }
+    }
+
     fun inputs(): Map<String, String> = mapOf(
         "caddy.env" to "XDG_DATA_HOME=/data\nXDG_CONFIG_HOME=/config\nHOME=/tmp\n",
         "caddy.json" to """{"admin":{"listen":"127.0.0.1:2019"},"storage":{"module":"file_system","root":"/data/caddy"},"apps":{"http":{"servers":{}}}}""" + "\n")
@@ -29,8 +44,8 @@ internal object CaddyRuntime {
      * dedicated egress network; no application may join it and all other networks stay internal. */
     fun publish(spec: PrivateDeploymentSpec, ingress: RuntimeIngressPublication): PrivateDeploymentSpec {
         require(spec.ingress == null && spec.store == RuntimeStore.CANONICAL_V2)
-        return spec.copy(ingress = ingress, networks = (spec.networks + "ingress-egress").distinct(),
-            processes = spec.processes.map { if (it.id == "caddy") it.copy(networks = (it.networks + "ingress-egress").distinct()) else it })
+        return spec.copy(ingress = ingress, networks = (listOf("ingress-egress") + spec.networks).distinct(),
+            processes = spec.processes.map { if (it.id == "caddy") it.copy(networks = (listOf("ingress-egress") + it.networks).distinct()) else it })
             .also { PrivateDeployment.validate(it) }
     }
 

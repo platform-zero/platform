@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 2,
+  "id": "private-alertmanager",
+  "revision": 2,
+  "product": "alertmanager",
+  "artifacts": [
+    "alertmanager"
+  ],
+  "networks": [
+    "metrics-private",
+    "alerts-web"
+  ],
+  "volumes": [
+    {
+      "id": "alertmanager",
+      "userId": 65534
+    }
+  ],
+  "inputs": [
+    {
+      "name": "alertmanager.yml",
+      "owner": "alertmanager",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "alertmanager"
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "output": "alertmanager.yml",
+      "resource": "alertmanager.yml",
+      "format": "LITERAL",
+      "parameters": {}
+    }
+  ],
+  "processes": [
+    {
+      "id": "alertmanager",
+      "artifact": "alertmanager",
+      "userId": 65534,
+      "memoryMiB": 128,
+      "networks": [
+        "metrics-private",
+        "alerts-web"
+      ],
+      "volumes": [
+        {
+          "volume": "alertmanager",
+          "target": "/alertmanager"
+        }
+      ],
+      "files": [
+        {
+          "file": "alertmanager.yml",
+          "target": "/etc/alertmanager/alertmanager.yml"
+        }
+      ],
+      "command": [
+        "--config.file=/etc/alertmanager/alertmanager.yml",
+        "--storage.path=/alertmanager",
+        "--web.listen-address=0.0.0.0:9093"
+      ],
+      "readinessHttpPort": 9093,
+      "readinessHttpPath": "/-/healthy"
+    }
+  ],
+  "install": {
+    "processes": [
+      "alertmanager"
+    ],
+    "dependencies": {
+      "alertmanager": []
+    }
+  },
+  "restore": {
+    "processes": [
+      "alertmanager"
+    ],
+    "dependencies": {
+      "alertmanager": []
+    }
+  },
+  "webNetworks": [
+    "alerts-web"
+  ]
+}

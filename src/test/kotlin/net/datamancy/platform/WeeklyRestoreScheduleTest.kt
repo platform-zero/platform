@@ -28,6 +28,7 @@ class WeeklyRestoreScheduleTest {
         var invalidOutcome: String? = null
         var controllerFails = false
         var hook: ((String) -> Unit)? = null
+        var nativeDeadline: Instant? = null
     }
     private fun fixture(block: (WeeklyRestoreSchedule, State, String, Path) -> Unit) {
         val base = Files.createTempDirectory("weekly-unit-")
@@ -43,6 +44,10 @@ class WeeklyRestoreScheduleTest {
             "/unit/adapter.py", hash, setOf("historical-readback"), buildJsonObject {}, buildJsonObject { put("fixture", "original") })))).toByteArray()
         val engine = WeeklyRestoreSchedule(base, { state.at }, { check(!state.controllerFails) }, { _, _, _ -> }, { _, slot, _, _ ->
             object : WeeklyRestoreBackend {
+                override fun bindDeadline(deadline: Instant) {
+                    assertEquals(state.at.plusSeconds(WeeklyRestoreSchedule.BUDGET_SECONDS), deadline)
+                    state.nativeDeadline = deadline
+                }
                 private fun effect(name: String) {
                     state.effects += name
                     state.hook?.invoke(name)
@@ -67,6 +72,11 @@ class WeeklyRestoreScheduleTest {
                 }
                 override fun verifyTargetIsolation(isolation: GenerationOutcome) = effect("observe")
                 override fun resumeSource(fences: Map<String, String>) = effect("resume")
+                override fun completionProof(held: GenerationHeldCapture, imported: GenerationOutcome,
+                    isolation: GenerationOutcome): WeeklyCompletionProof {
+                    effect("durable-proof")
+                    return WeeklyCompletionProof(hash, hash, hash, hash)
+                }
             }
         }, { refs }, { _, generation, _, operation -> refs.withProtection { protection ->
             state.effects += "retention"; state.hook?.invoke("retention")
@@ -78,12 +88,25 @@ class WeeklyRestoreScheduleTest {
         try { block(engine, state, engine.enroll(inventory, binding, plan), base.resolve("$q/weekly-restore")) }
         finally { Thread.interrupted(); Files.walk(base).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
     }
+    @Test fun `native completion evidence defaults omitted for historical weekly result bytes`() {
+        val snapshot = receipt()
+        val target = "q-111111111111"
+        val assertions = setOf("fixture:readback")
+        val legacy = WeeklyRestoreResult(snapshot.id, target, hash, snapshot,
+            WeeklyFunctionalResult(snapshot.id, target, hash, snapshot.snapshotId, assertions, true), assertions,
+            GenerationOutcome("isolate", hash, true, fences = mapOf("$target-core" to "22222222-2222-2222-2222-222222222222")), true)
+        val bytes = json.encodeToString(legacy)
+        assertFalse("completionProof" in bytes || "nativeCompletion" in bytes)
+        assertEquals(legacy, json.decodeFromString<WeeklyRestoreResult>(bytes))
+        assertTrue("completionProof" in json.encodeToString(legacy.copy(completionProof = WeeklyCompletionProof(hash, hash, hash, hash))))
+    }
     @Test fun `UTC Sunday boundary and bounded latest catchup`() {
         assertEquals("2025-12-28", WeeklyRestoreSchedule.sunday(Instant.parse("2026-01-04T03:59:59Z")))
         assertEquals("2026-01-04", WeeklyRestoreSchedule.sunday(Instant.parse("2026-01-04T04:00:00Z")))
         fixture { engine, state, expected, root ->
             assertEquals("completed", engine.tick(q, expected).status)
-            assertEquals(listOf("hold", "restore", "start", "verify", "isolate", "observe", "resume"), state.effects)
+            assertEquals(state.at.plusSeconds(WeeklyRestoreSchedule.BUDGET_SECONDS), state.nativeDeadline)
+            assertEquals(listOf("hold", "restore", "start", "verify", "isolate", "observe", "resume", "durable-proof"), state.effects)
             assertEquals("already-completed", engine.tick(q, expected).status)
             state.at = Instant.parse("2026-03-30T12:00:00Z")
             assertEquals("2026-03-29", engine.tick(q, expected).slot!!.sunday)
@@ -104,6 +127,17 @@ class WeeklyRestoreScheduleTest {
     }
     @Test fun `functional assertions are exact not merely successful exit`() = fixture { engine, state, expected, _ ->
         state.mismatch = true; assertFails { engine.tick(q, expected) }; assertFalse("resume" in state.effects)
+    }
+    @Test fun `partial weekly history checkpoint prevents another source hold`() = fixture { engine, state, expected, root ->
+        engine.tick(q, expected)
+        val history = Files.createDirectory(root.resolve("history"),
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+        ReleasePrivateFiles.save(history.resolve("segment-00000001.intent.json"), "incomplete".toByteArray())
+        state.at = state.at.plusSeconds(604800)
+        val before = state.effects.toList()
+        assertFails { engine.tick(q, expected) }
+        assertEquals(before, state.effects)
+        assertTrue(Files.exists(history.resolve("segment-00000001.intent.json")))
     }
     @Test fun `unknown completed record cannot be bypassed by a later Sunday`() = fixture { engine, state, expected, root ->
         engine.tick(q, expected)

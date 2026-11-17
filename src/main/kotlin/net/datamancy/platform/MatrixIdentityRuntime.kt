@@ -47,6 +47,159 @@ internal object MatrixIdentityRuntime {
                 web("element", listOf("auth", "synapse"), "element-nginx.conf", listOf(RuntimeFile("element.json", "/run/secrets/element.json")))
             )).also { PrivateDeployment.validate(it) }
     }
+    /** Exactly one MAS application and SQL schema against the shared canonical PostgreSQL
+     * and Keycloak. No identity realm/user, PostgreSQL or Caddy provider is duplicated.
+     */
+    fun canonicalFragment(inventory: AcquiredInventory, base: PrivateDeploymentSpec): CanonicalProviderFragment {
+        require(base.store == RuntimeStore.CANONICAL_V2 && base.processes.any { it.id == "keycloak" && !it.oneShot })
+        val postgres = base.processes.single { it.id == "postgres" && !it.oneShot }
+        val image = inventory.images.single { it.product == "matrix-authentication-service" }.also {
+            require(it.os == "linux" && it.architecture == "amd64")
+        }
+        val admin = RuntimeProcess("mas-db-init", postgres.image, postgres.imageId, 999,
+            dependencies = listOf("postgres"), entrypoint = "/bin/sh", oneShot = true,
+            environmentFile = "mas-db-admin.env", files = listOf(RuntimeFile("postgres-ca.pem", "/run/secrets/postgres-ca.pem")),
+            networks = listOf("db-admin", "mas-data"), apparmorProfile = "p0v3-private-v1", command = listOf("-ec", """
+                export PGPASSWORD="${'$'}POSTGRES_PASSWORD"
+                psql -X -h postgres -U postgres -v ON_ERROR_STOP=1 <<SQL
+                CREATE ROLE mas LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '${'$'}MAS_PASSWORD';
+                CREATE DATABASE mas OWNER mas;
+                REVOKE ALL ON DATABASE mas FROM PUBLIC;
+                SQL
+            """.trimIndent()))
+        val files = listOf(RuntimeFile("mas.yaml", "/run/secrets/mas.yaml"),
+            RuntimeFile("mas-signing.pem", "/run/secrets/mas-signing.pem"),
+            RuntimeFile("postgres-ca.pem", "/run/secrets/postgres-ca.pem"))
+        fun process(id: String, command: List<String>, oneShot: Boolean, dependencies: List<String>) =
+            RuntimeProcess(id, image.pinnedImage, image.imageId, 65532,
+                dependencies = dependencies, entrypoint = "/usr/local/bin/mas-cli", command = command,
+                environmentFile = "mas-runtime.env", files = files,
+                networks = if (oneShot) listOf("mas-data", "mas-web") else listOf("mas-data", "mas-web", "identity-web"),
+                oneShot = oneShot, memoryMiB = 768, apparmorProfile = "p0v3-private-v1",
+                readinessHttpPort = if (oneShot) null else 8080, readinessHttpPath = "/health")
+        val migration = process("mas-migrate", listOf("-c", "/run/secrets/mas.yaml", "database", "migrate"), true,
+            listOf("mas-db-init"))
+        val sync = process("mas-config-init", listOf("-c", "/run/secrets/mas.yaml", "config", "sync"), true,
+            listOf("mas-migrate", "keycloak", "caddy", "synapse"))
+        val daemon = process("mas", listOf("-c", "/run/secrets/mas.yaml", "server", "--no-migrate", "--no-sync"), false,
+            listOf("mas-config-init", "synapse", "keycloak", "caddy"))
+        val partial = PrivateDeploymentSpec(name = base.name, store = base.store,
+            volumes = emptyList(), processes = listOf(admin, migration, sync, daemon),
+            networks = listOf("mas-data", "mas-web", "identity-web"), databaseAccess = listOf(
+                RuntimeDatabaseAccess("mas", "postgres", "postgres", "mas", "mas", "mas-runtime.env", "mas-data"),
+                RuntimeDatabaseAccess("mas-migrate", "postgres", "postgres", "mas", "mas", "mas-runtime.env", "mas-data"),
+                RuntimeDatabaseAccess("mas-config-init", "postgres", "postgres", "mas", "mas", "mas-runtime.env", "mas-data")))
+        return CanonicalProviderFragment("matrix-authentication-service", partial,
+            providerNetworks = mapOf("postgres" to setOf("mas-data")), webNetworks = setOf("mas-web"),
+            identityWebConsumers = setOf(CanonicalIdentityWebConsumer.MAS))
+    }
+
+    fun canonicalColdFragment(inventory: AcquiredInventory, base: PrivateDeploymentSpec,
+        original: CanonicalProviderFragment): CanonicalProviderFragment {
+        val fresh = canonicalFragment(inventory, base)
+        require(original == fresh && fresh.spec.processes.filter { it.oneShot }.map { it.id }.toSet() ==
+            setOf("mas-db-init", "mas-migrate", "mas-config-init")) {
+            "MAS source schema/client/signing key must be the original compiled cohort"
+        }
+        val daemon = fresh.spec.processes.single { it.id == "mas" }
+        return fresh.copy(spec = fresh.spec.copy(processes = listOf(daemon.copy(
+            dependencies = daemon.dependencies.filterNot { it in setOf("mas-db-init", "mas-migrate", "mas-config-init") })),
+            databaseAccess = fresh.spec.databaseAccess.filter { it.consumer == "mas" }))
+    }
+
+    fun canonicalUpstreamClient(clientSecret: String) = buildJsonObject {
+        require(clientSecret.matches(Regex("[a-f0-9]{64}")))
+        put("clientId", "matrix-mas"); put("enabled", true); put("protocol", "openid-connect")
+        put("publicClient", false); put("secret", clientSecret); put("standardFlowEnabled", true)
+        put("directAccessGrantsEnabled", false); put("serviceAccountsEnabled", false)
+        put("redirectUris", buildJsonArray { add("https://matrix-auth.datamancy.net/upstream/callback/$PROVIDER") })
+        put("webOrigins", buildJsonArray { add("https://matrix-auth.datamancy.net") })
+        put("attributes", buildJsonObject { put("pkce.code.challenge.method", "S256") })
+    }
+
+    /** The caller passes ONE credential pair both to this original MAS config and the
+     * A05 canonical Keycloak client before either input map is persisted.
+     */
+    fun canonicalInputs(postgresAdminPassword: String, masPassword: String,
+        upstreamClientSecret: String, signingKey: String, encryptionSecret: String,
+        matrixSharedSecret: String): Map<String, String> {
+        require(listOf(postgresAdminPassword, masPassword, upstreamClientSecret, encryptionSecret, matrixSharedSecret).all {
+            it.matches(Regex("[a-f0-9]{64}"))
+        } && listOf(postgresAdminPassword, masPassword, upstreamClientSecret, encryptionSecret, matrixSharedSecret).distinct().size == 5 &&
+            signingKey.startsWith("-----BEGIN PRIVATE KEY-----\n") && signingKey.endsWith("-----END PRIVATE KEY-----\n") &&
+            signingKey.length in 1600..8192)
+        return mapOf(
+            "mas-db-admin.env" to "PGHOST=postgres\nPGUSER=postgres\nPGDATABASE=postgres\nPOSTGRES_PASSWORD=$postgresAdminPassword\nPGSSLMODE=verify-full\nPGSSLROOTCERT=/run/secrets/postgres-ca.pem\nMAS_PASSWORD=$masPassword\n",
+            // The selected r9 Keycloak issuer has a generation-issued ingress leaf,
+            // not public ACME. MAS verifies that exact issuer through its own CA mount.
+            "mas-runtime.env" to "RUST_LOG=mas=warn\nSSL_CERT_FILE=/run/secrets/identity-ca.pem\n",
+            "mas-signing.pem" to signingKey,
+            "mas.yaml" to """
+                http:
+                  public_base: https://matrix-auth.datamancy.net/
+                  listeners:
+                    - name: internal
+                      resources:
+                        - name: discovery
+                        - name: human
+                        - name: oauth
+                        - name: compat
+                        - name: graphql
+                        - name: assets
+                          path: /usr/local/share/mas-cli/assets/
+                        - name: health
+                      binds:
+                        - address: '0.0.0.0:8080'
+                database:
+                  uri: postgresql://mas:$masPassword@postgres:5432/mas?sslmode=verify-full&sslrootcert=/run/secrets/postgres-ca.pem
+                  max_connections: 10
+                matrix:
+                  kind: synapse
+                  homeserver: matrix.datamancy.net
+                  endpoint: http://synapse:8008
+                  secret: '$matrixSharedSecret'
+                secrets:
+                  encryption: '$encryptionSecret'
+                  keys:
+                    - kid: original-mas-rsa
+                      key_file: /run/secrets/mas-signing.pem
+                passwords:
+                  enabled: false
+                clients:
+                  - client_id: $ELEMENT_CLIENT
+                    client_auth_method: none
+                    redirect_uris: ['https://chat.datamancy.net/', 'https://chat.datamancy.net/?no_universal_links=true']
+                upstream_oauth2:
+                  providers:
+                    - id: $PROVIDER
+                      human_name: Original Keycloak
+                      issuer: https://auth.datamancy.net/realms/p0v3
+                      client_id: matrix-mas
+                      client_secret: '$upstreamClientSecret'
+                      token_endpoint_auth_method: client_secret_basic
+                      scope: 'openid profile email'
+                      pkce_method: always
+                      discovery_mode: oidc
+                      claims_imports:
+                        subject:
+                          template: '{{ user.sub }}'
+                        skip_confirmation: true
+                        localpart:
+                          action: require
+                          template: '{{ user.preferred_username }}'
+                          on_conflict: fail
+                        displayname:
+                          action: force
+                        email:
+                          action: ignore
+                policy:
+                  data:
+                    registration:
+                      allowed_usernames:
+                        literals: [owner, reader]
+            """.trimIndent() + "\n")
+    }
+
     fun prepare(inventory: AcquiredInventory, base: Path = PrivateDeployment.BASE, name: String = "matrix-identity", store: RuntimeStore = RuntimeStore.LEGACY): Path =
         RuntimePreparation.prepare(spec(inventory, name).copy(store = store), base) { inputs() }
 

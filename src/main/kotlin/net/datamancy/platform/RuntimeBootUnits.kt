@@ -24,6 +24,9 @@ internal object RuntimeBootUnits {
     }
     fun render(spec: PrivateDeploymentSpec, manifestHash: String, controllerHash: String, userId: Int): String {
         PrivateDeployment.validate(spec)
+        require(spec.executionBackend == RuntimeExecutionBackend.DIRECT_PODMAN_V1) {
+            "Quadlet generations require their own controller-owned boot installer; direct-Podman fallback refused"
+        }
         require(digest.matches(manifestHash) && digest.matches(controllerHash) && userId in 1..65534)
         val controller = "/mnt/media/p0-v3/runtime-supervision/releases/$controllerHash/bin/p0-v3-platform"
         // ExecStop must have enough time for each daemon's audited graceful shutdown.

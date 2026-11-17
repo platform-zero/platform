@@ -28,9 +28,32 @@ internal object NotebookRuntime {
             databaseAccess = compiled.databaseAccess.filterNot { it.consumer == "notebook-init" }).also { PrivateDeployment.validate(it) }
     }
 
+    fun canonicalFragment(inventory: AcquiredInventory, name: String): CanonicalProviderFragment {
+        val source = spec(inventory, name)
+        val partial = source.copy(store = RuntimeStore.CANONICAL_V2, networks = listOf("notebook-data", "notebook-web"),
+            processes = source.processes.map { p -> p.copy(
+                environmentFile = p.environmentFile?.let { "jupyter-notebook-$it" },
+                files = p.files.map { it.copy(file = "jupyter-notebook-${it.file}") },
+                networks = if (p.oneShot) listOf("notebook-data") else listOf("notebook-data", "notebook-web")) })
+        PrivateDeployment.validate(partial)
+        return CanonicalProviderFragment("jupyter-notebook", partial, webNetworks = setOf("notebook-web"))
+    }
+
+    fun coldRestoreFragment(fresh: CanonicalProviderFragment): CanonicalProviderFragment {
+        require(fresh.product == "jupyter-notebook" && fresh.spec.processes.map { it.id }.toSet() ==
+            setOf("notebook-init", "notebook") && fresh.spec.store == RuntimeStore.CANONICAL_V2)
+        return fresh.copy(spec = coldRestoreSpec(fresh.spec))
+    }
+
+    fun canonicalInputs(token: () -> String = RuntimePreparation::password): Map<String, String> =
+        inputs(token).mapKeys { (name, _) -> "jupyter-notebook-$name" }
+
     fun prepare(inventory: AcquiredInventory, base: Path = PrivateDeployment.BASE, name: String = "notebook", store: RuntimeStore = RuntimeStore.LEGACY): Path =
-        RuntimePreparation.prepare(spec(inventory, name).copy(store = store), base) {
-            mapOf("notebook.env" to "HOME=/home/jovyan\nP0V3_NOTEBOOK_TOKEN=${RuntimePreparation.password()}\n",
+        RuntimePreparation.prepare(spec(inventory, name).copy(store = store), base) { inputs() }
+
+    fun inputs(token: () -> String = RuntimePreparation::password): Map<String, String> {
+        val secret = token(); require(secret.matches(Regex("[a-f0-9]{64}")))
+        return mapOf("notebook.env" to "HOME=/home/jovyan\nP0V3_NOTEBOOK_TOKEN=$secret\n",
                 "server.py" to """
                     import os
                     c = get_config()
@@ -49,5 +72,5 @@ internal object NotebookRuntime {
                     c.IdentityProvider.token = os.environ["P0V3_NOTEBOOK_TOKEN"]
                     c.LabApp.extension_manager = "readonly"
                 """.trimIndent() + "\n")
-        }
+    }
 }

@@ -4,6 +4,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlin.test.*
 
@@ -17,6 +18,7 @@ class KopiaGenerationStoreTest {
         var failPhase: String? = null
         var timeoutPhase: String? = null
         var badImage = false
+        var missingCreateAck = false
         var badStore = false
         var wrongRoot = false
         var snapshotOutput: String? = null
@@ -31,7 +33,8 @@ class KopiaGenerationStoreTest {
             val output = when (args.first()) {
                 "info" -> """{"host":{"security":{"rootless":false,"apparmorEnabled":true,"seccompEnabled":true}},"store":{"graphRoot":"${if (badStore) "/wrong" else PrivateRootfulCommands.ROOT}","runRoot":"${PrivateRootfulCommands.RUN}"}}"""
                 "image" -> """[{"Id":"${if (badImage) "c".repeat(64) else "b".repeat(64)}","Digest":"sha256:${"a".repeat(64)}"}]"""
-                "create" -> "unit-container"
+                "create" -> if (missingCreateAck) "unacknowledged" else
+                    ReleaseLocks.sha256(args.joinToString("\n").toByteArray())
                 "start" -> {
                     val name = args.last()
                     onStart(name)
@@ -72,9 +75,54 @@ class KopiaGenerationStoreTest {
         try { block(root, repository, key, operation, manifest, payloads, fake, KopiaGenerationStore(image, fake)) }
         finally { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
     }
+    @Test fun `pending snapshot readback separates native pin from original acknowledgement`() = fixture { root, _, key, _, manifest, payloads, fake, store ->
+        fun dir(path: Path): Path = Files.createDirectory(path,
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+        val repository = dir(root.resolve("kopia-store")).resolve("repository")
+        val operation = dir(dir(root.resolve("kopia-captures")).resolve(cap))
+        store.snapshot(repository,key,operation,manifest,payloads)
+        val staged = dir(operation.resolve("payload"))
+        Files.writeString(staged.resolve("manifest.json"),Json.encodeToString(manifest))
+        Files.setPosixFilePermissions(staged.resolve("manifest.json"),PosixFilePermissions.fromString("rw-------"))
+        val pending = repository.parent.resolve("snapshot.pending.json")
+        Files.writeString(pending,Json.encodeToString(mapOf("generation" to generation,"capture" to cap)))
+        Files.setPosixFilePermissions(pending,PosixFilePermissions.fromString("rw-------"))
+        fake.retentionObservation = "[${native.dropLast(1)},\"pins\":[\"$cap\"]}]"
+        val result = store.observePendingSnapshot(repository,key,operation,generation,cap,
+            "r-111111111111","r-222222222222")
+        assertEquals("c".repeat(32),result.observedSnapshotId)
+        assertEquals("original-native-result-and-pin-observed; separate-disposition-required",result.disposition)
+        assertTrue(Files.exists(pending))
+        assertFails { store.observePendingSnapshot(repository,key,operation,generation,cap,
+            "r-333333333333","r-333333333333") }
+    }
+    @Test fun `unacknowledged worker create cannot be started or retroactively given a CID`() = fixture { root, repo, key, op, manifest, payloads, fake, store ->
+        fake.missingCreateAck = true
+        assertFails { store.snapshot(repo, key, op, manifest, payloads) }
+        assertTrue(Files.exists(repo.parent.resolve("initialize.intent.json")))
+        assertFalse(Files.exists(repo.parent.resolve("initialize.create.result.json")))
+        assertTrue(fake.calls.none { it.first() == "start" })
+        fake.missingCreateAck = false
+        assertFails { store.snapshot(repo, key, op, manifest, payloads) }
+        assertTrue(fake.calls.none { it.first() == "start" })
+    }
     @Test fun `networkless pinned snapshots reuse custody and repository without bootstrap replay`() = fixture { root, repo, key, op, manifest, payloads, fake, store ->
         val receipt = store.snapshot(repo, key, op, manifest, payloads)
         assertEquals("c".repeat(32), receipt.snapshotId)
+        val originalCreate = kotlinx.serialization.json.Json.decodeFromString<KopiaOriginalWorkerCreate>(
+            Files.readString(op.resolve("snapshot.create.result.json")))
+        assertEquals("p0v3-kopia-${manifest.generation}-${manifest.id}-snapshot", originalCreate.container)
+        assertEquals("none", originalCreate.unit)
+        val originalIntent = Files.readAllBytes(op.resolve("snapshot.intent.json"))
+        assertEquals(ReleaseLocks.sha256(originalIntent), originalCreate.intentSha256)
+        val snapshotCreates = fake.calls.filter { it.first() == "create" &&
+            "--name=${originalCreate.container}" in it }
+        assertEquals(1, snapshotCreates.size) // Later verify/observe workers have distinct CREATE names.
+        val snapshotCreate = snapshotCreates.single()
+        val intentFields = Json.decodeFromString<Map<String, String>>(originalIntent.decodeToString())
+        assertEquals(originalCreate.container, intentFields["container"])
+        assertEquals(ReleaseLocks.sha256(Json.encodeToString(snapshotCreate).toByteArray()), intentFields["argvSha256"])
+        assertEquals(ReleaseLocks.sha256(snapshotCreate.joinToString("\n").toByteArray()), originalCreate.containerId)
         assertFalse(Files.exists(op.resolve("payload")))
         assertFalse(Files.exists(repo.parent.resolve("snapshot.pending.json")))
         val originalKey = Files.readAllBytes(key)
@@ -226,6 +274,21 @@ class KopiaGenerationStoreTest {
         assertFails { store.retain(repo, key, generation, "r-123456789abc", KopiaRetentionAuthority { it(protection) }) }
     }
 
+    @Test fun `retention refuses altered archived terminal and protected census page before native deletion`() =
+        retentionFixture { _, _, _, _, _, _, fake, _, protection ->
+            val live = protection.receipts.map { it.snapshotId }.toSet()
+            val archivedTerminal = "e".repeat(32)
+            val pages = KopiaRetention.censusPages(protection.referenceHeadSha256, live,
+                protection.referencedSnapshotIds, setOf(archivedTerminal))
+            val genuine = protection.copy(censusPages = pages)
+            KopiaRetention.plan("r-123456789abc", generation, requireNotNull(fake.retentionBefore), genuine) { _, _ -> }
+            assertFails { KopiaRetention.plan("r-123456789abc", generation, requireNotNull(fake.retentionBefore),
+                genuine.copy(censusPages = pages.map { it.copy(sha256 = "0".repeat(64)) })) { _, _ -> } }
+            assertFails { KopiaRetention.plan("r-123456789abc", generation, requireNotNull(fake.retentionBefore),
+                genuine.copy(censusPages = KopiaRetention.censusPages(protection.referenceHeadSha256, live,
+                    protection.referencedSnapshotIds, setOf(protection.receipts.first().snapshotId)))) { _, _ -> } }
+        }
+
     @Test fun `additional native pins prevent deletion and unchanged metadata is required`() = retentionFixture { _, repo, key, _, _, _, fake, store, protection ->
         val pin = "\"${protection.receipts[3].id}\""
         fake.retentionBefore = fake.retentionBefore!!.replace("\"pins\":[$pin]", "\"pins\":[$pin,\"external-hold\"]")
@@ -289,6 +352,21 @@ class KopiaGenerationStoreTest {
         }
     }
 
+    @Test fun `two fresh independent retention censuses preserve missing original ACK and pending fence`() = retentionFixture { _, repo, key, _, _, _, fake, store, protection ->
+        fake.timeoutPhase = "-delete"
+        assertFails { store.retain(repo, key, generation, "r-123456789abc", KopiaRetentionAuthority { it(protection) }) }
+        fake.timeoutPhase = null
+        fake.retentionObservation = fake.retentionAfter
+        val pending = Files.readAllBytes(repo.parent.resolve("retention.pending.json"))
+        val readback = store.observeRetentionReadback(repo, key, generation, "r-111111111111", "r-222222222222")
+        assertEquals("planned-deletions-observed", readback.disposition)
+        assertFalse(readback.originalAcknowledged)
+        assertNotEquals(readback.first.id, readback.second.id)
+        assertEquals(readback.first.removed, readback.second.removed)
+        assertContentEquals(pending, Files.readAllBytes(repo.parent.resolve("retention.pending.json")))
+        assertFails { store.observeRetentionReadback(repo, key, generation, "r-111111111111", "r-222222222222") }
+    }
+
     @Test fun `failed retention policy cannot be adopted as a deletion plan`() = retentionFixture { _, repo, key, _, _, _, fake, store, protection ->
         fake.failPhase = "-policy"
         assertFails { store.retain(repo, key, generation, "r-123456789abc", KopiaRetentionAuthority { it(protection) }) }
@@ -337,6 +415,16 @@ class KopiaGenerationStoreTest {
         val count = fake.calls.size
         assertFails { store.retain(repo, key, generation, "r-123456789abc", authority) }
         assertEquals(count, fake.calls.size)
+        val live = (0..129).map { it.toString(16).padStart(32, 'a') }.toSet()
+        val retired = "c".repeat(32)
+        val held = live.take(2).toSet()
+        val census = KopiaRetention.censusPages("d".repeat(64), live, held, setOf(retired))
+        assertEquals(2, census.size)
+        assertEquals(census.first().sha256, census.last().previousSha256)
+        assertEquals(live, census.flatMap { it.live }.toSet())
+        assertEquals(held, census.flatMap { it.protectedIds }.toSet())
+        assertEquals(setOf(retired), census.flatMap { it.terminal }.toSet())
+        assertFails { KopiaRetention.censusPages("d".repeat(64), live, setOf(retired), setOf(retired)) }
         assertFails { KopiaRetention.inventory("[]") }
         assertFails { KopiaRetention.inventory(" ".repeat(1048577)) }
     }
@@ -350,6 +438,11 @@ class KopiaGenerationStoreTest {
         assertTrue(fake.calls.isEmpty())
     }
 
+    @Test fun `native Kopia worker refuses expired operation deadlines before effects`() {
+        assertFails { KopiaGenerationStore.real(AcquiredInventory(1, "unit", emptyList()), deadline = java.time.Instant.EPOCH) }
+        assertFails { KopiaGenerationStore.real(AcquiredInventory(1, "unit", emptyList()),
+            deadline = java.time.Instant.now().plusSeconds(WeeklyRestoreSchedule.BUDGET_SECONDS + 60)) }
+    }
     @Test fun `changed custody or snapshot object refuses restoration before writable mount`() = fixture { root, repo, key, op, manifest, payloads, fake, store ->
         val receipt = store.snapshot(repo, key, op, manifest, payloads)
         val restore = Files.createDirectory(root.resolve("restore")); Files.setPosixFilePermissions(restore, PosixFilePermissions.fromString("rwx------"))

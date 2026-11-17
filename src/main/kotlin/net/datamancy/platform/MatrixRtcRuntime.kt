@@ -1,6 +1,8 @@
 package net.datamancy.platform
 
 import java.nio.file.Path
+import java.security.KeyPairGenerator
+import java.util.Base64
 import kotlinx.serialization.json.*
 
 /** Opt-in private delegated MatrixRTC deployment. Never rewrites a previously sealed identity recipe.
@@ -9,6 +11,95 @@ import kotlinx.serialization.json.*
 internal object MatrixRtcRuntime {
     const val SERVER = "matrix.private.invalid"
     const val RTC = "https://rtc:8443"
+
+    /** One release-v2 provider cohort: every feature supplies only its own process, state,
+     * provider edge, inputs and explicit cold projection. The coordinator compiles/merges the
+     * complete graph purely BEFORE preparing any credential or writing an operation intent.
+     */
+    fun canonicalFragments(inventory: AcquiredInventory, base: PrivateDeploymentSpec): List<CanonicalProviderFragment> {
+        require(base.name.matches(Regex("(?:(?:q-[a-f0-9]{12}-)?canonical-release-v2|q-[a-f0-9]{12}-v2)")) &&
+            base.store == RuntimeStore.CANONICAL_V2)
+        return listOf(SynapseRuntime.canonicalFragment(inventory, base),
+            MatrixIdentityRuntime.canonicalFragment(inventory, base), MatrixRuntime.canonicalFragment(inventory, base),
+            LiveKitRuntime.canonicalFragment(inventory, base))
+    }
+
+    fun canonicalColdFragments(inventory: AcquiredInventory, base: PrivateDeploymentSpec,
+        original: List<CanonicalProviderFragment>): List<CanonicalProviderFragment> {
+        val fresh = canonicalFragments(inventory, base)
+        require(original == fresh) { "Original MatrixRTC provider and image graph changed" }
+        return listOf(SynapseRuntime.canonicalColdFragment(inventory, base, original[0]),
+            MatrixIdentityRuntime.canonicalColdFragment(inventory, base, original[1]),
+            MatrixRuntime.canonicalColdFragment(inventory, base, original[2]),
+            LiveKitRuntime.canonicalColdFragment(inventory, base, original[3]))
+    }
+
+    /** One fixed credential projection for the four application fragments. The SAME
+     * upstreamClientSecret MUST be included in the A05 realm client before provider inputs
+     * are sealed; the caller never substitutes an independent second Keycloak.
+     */
+    fun canonicalInputs(providerInputs: Map<String, String>, upstreamClientSecret: String,
+        password: () -> String = RuntimePreparation::password,
+        pki: (String) -> Map<String, String> = { origin ->
+            require(origin == "rtc.datamancy.net")
+            PrivateWebPki.generate("rtc", dnsNames = listOf("rtc", origin)) }): Map<String, String> {
+        val admin = providerInputs.getValue("postgres-admin.env").lineSequence()
+            .single { it.startsWith("PGPASSWORD=") }.substringAfter('=')
+        require(providerInputs.getValue("postgres.env").lineSequence()
+            .single { it.startsWith("POSTGRES_PASSWORD=") }.substringAfter('=') == admin &&
+            admin.matches(Regex("[a-f0-9]{64}")) && upstreamClientSecret.matches(Regex("[a-f0-9]{64}")))
+        val secrets = List(8) { password() }
+        require(secrets.all { it.matches(Regex("[a-f0-9]{64}")) } &&
+            (secrets + admin + upstreamClientSecret).distinct().size == 10)
+        val synapseDb = secrets[0]; val masDb = secrets[1]
+        val masEncryption = secrets[2]; val matrixShared = secrets[3]
+        val asToken = secrets[4]; val hsToken = secrets[5]
+        val livekitKey = secrets[6]; val livekitSecret = secrets[7]
+        val signer = KeyPairGenerator.getInstance("RSA").apply { initialize(3072) }.generateKeyPair().private
+        val signingPem = "-----BEGIN PRIVATE KEY-----\n" +
+            Base64.getMimeEncoder(64, byteArrayOf(10)).encodeToString(signer.encoded) + "\n-----END PRIVATE KEY-----\n"
+        val registration = """
+            id: p0v3-matrix-rtc
+            as_token: '$asToken'
+            hs_token: '$hsToken'
+            sender_localpart: _p0v3_rtc
+            namespaces:
+              users:
+                - exclusive: false
+                  regex: '^@[^:]+:matrix[.]datamancy[.]net${'$'}'
+            url: null
+            rate_limited: true
+            io.element.msc4502.scopes: ['urn:matrix:client:io.element.msc4502:rooms:is_joined']
+            io.element.msc4512.proxy_prefix: rtc/livekit
+            io.element.msc4512.proxy_url: http://rtc-authorizer:8080
+        """.trimIndent() + "\n"
+        val synapse = SynapseRuntime.canonicalInputs(admin, synapseDb).toMutableMap()
+        synapse["synapse-homeserver.yaml"] = synapse.getValue("synapse-homeserver.yaml") + """
+            matrix_authentication_service:
+              enabled: true
+              endpoint: http://mas:8080/
+              secret: '$matrixShared'
+            app_service_config_files: [/run/secrets/rtc-registration.yaml]
+            experimental_features:
+              msc4143_enabled: true
+              msc4222_enabled: true
+              msc4502_enabled: true
+              msc4512_enabled: true
+            max_event_delay_duration: 24h
+            matrix_rtc:
+              transports:
+                - type: livekit
+                  livekit_service_url: https://matrix-rtc.datamancy.net/livekit/jwt
+        """.trimIndent() + "\n"
+        val mas = MatrixIdentityRuntime.canonicalInputs(admin, masDb, upstreamClientSecret,
+            signingPem, masEncryption, matrixShared)
+        val livekit = LiveKitRuntime.canonicalInputs(livekitKey, livekitSecret, registration, pki("rtc.datamancy.net"))
+        val parts = listOf(synapse, mas, MatrixRuntime.canonicalInputs(), livekit,
+            mapOf("rtc-registration.yaml" to registration))
+        val names = parts.flatMap { it.keys }
+        require(names.distinct().size == names.size) { "A MatrixRTC input would overwrite a canonical provider/feature secret" }
+        return parts.fold(emptyMap<String, String>()) { result, part -> result + part }
+    }
 
     fun spec(inventory: AcquiredInventory, name: String = "matrix-rtc"): PrivateDeploymentSpec {
         val identity = MatrixIdentityRuntime.spec(inventory, name)

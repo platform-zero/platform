@@ -30,6 +30,14 @@ class GenerationRecoveryTest {
                 pins.sumOf { it.spec.processes.sumOf { p -> p.memoryMiB.toLong() } })
         }
         val original = sourceBundle(listOf("canonical-providers", "openbao", "notebook", "jupyterhub"))
+        GenerationColdCaptureAdmission.requireSupported(original)
+        val quadlet = original.copy(members = listOf(original.members.first().let {
+            it.copy(spec = it.spec.copy(executionBackend = RuntimeExecutionBackend.QUADLET_V2))
+        }) + original.members.drop(1))
+        assertFailsWith<IllegalArgumentException> { GenerationColdCaptureAdmission.requireSupported(quadlet) }
+        assertFailsWith<IllegalArgumentException> {
+            GenerationColdCaptureAdmission.requireSupported(original.copy(members = emptyList()))
+        }
         val restored = FoundationRestore.bundle(original, artifacts, target, "c".repeat(64), ColdRestoreCohort.WHOLE_RELEASE)
         assertTrue(restored.members.all { pin -> pin.spec.processes.none { it.oneShot } })
         assertEquals(original.request.candidateSha256, restored.request.releaseCandidateSha256)
@@ -210,6 +218,25 @@ class GenerationRecoveryTest {
             block(Fixture(root, engine, fake, control, runtime, custody, bundle, hash, verified, extracted))
         } finally { Thread.interrupted(); Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
     }
+    @Test fun `capture admission failure retains its operation identity without snapshot replay`() = fixture(owned = true, canonical = true) { f ->
+        val generationRoot = f.control.resolve(source)
+        f.bundle.members.forEach { pin ->
+            Files.copy(f.extracted.resolve("${pin.spec.name}/jobs.json"), f.runtime.resolve("${pin.spec.name}/runtime.jobs"))
+        }
+        ReleasePrivateFiles.save(generationRoot.resolve("stage.intent.json"), json.encodeToString(GenerationIntent("stage", f.bundleSha)).toByteArray())
+        ReleasePrivateFiles.save(generationRoot.resolve("stage.result.json"), json.encodeToString(GenerationOutcome("stage", f.bundleSha, true)).toByteArray())
+        var snapshots = 0
+        val store = object : GenerationSnapshotStore {
+            override fun snapshot(repository: Path, custody: Path, operation: Path, manifest: CapsuleManifest,
+                payloads: Map<String, Path>): KopiaSnapshotReceipt { snapshots++; error("Must not reach snapshot") }
+            override fun restore(repository: Path, custody: Path, operation: Path, receipt: KopiaSnapshotReceipt,
+                destination: Path): Unit = error("Must not restore")
+        }
+        assertFails { f.engine.captureKopia(inventory, source, f.bundleSha, cap, f.custody, store) }
+        f.engine.isolate(source, f.bundleSha)
+        assertFails { f.engine.captureKopia(inventory, source, f.bundleSha, cap, f.custody, store) }
+        assertEquals(0, snapshots)
+    }
     @Test fun `Kopia capture and restore bind native snapshot identity without fabricating capsule authentication`() = fixture(owned = true, canonical = true) { f ->
         fun privateWrite(path: Path, bytes: ByteArray) {
             Files.createFile(path, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"))); Files.write(path, bytes)
@@ -246,7 +273,6 @@ class GenerationRecoveryTest {
             }
             override fun restore(repository: Path, custody: Path, operation: Path, receipt: KopiaSnapshotReceipt, destination: Path) = copyTree(f.root.resolve("unit-snapshot-${receipt.id}"), destination)
         }
-        assertFails { f.engine.captureKopia(inventory, source, f.bundleSha, cap, f.custody, store) }
         f.engine.isolate(source, f.bundleSha)
         val captured = f.engine.captureKopia(inventory, source, f.bundleSha, cap, f.custody, store)
         val snapshot = assertNotNull(captured.snapshot)
@@ -427,6 +453,34 @@ class GenerationRecoveryTest {
         assertFailsWith<IllegalArgumentException> { GenerationRecovery.validate(extracted, verified) }
         assertTrue(f.fake.imports.isEmpty())
     }
+    @Test fun `authenticated managed archives cannot be grafted onto an unmanaged original source`() : Unit = fixture { f ->
+        val original = json.decodeFromString<CapsuleManifest>(Files.readString(f.extracted.resolve("manifest.json")))
+        val tar = original.files.first { it.name.contains("/volumes/") && it.bytes >= 1024 && it.bytes % 512 == 0L }
+        val managed = linkedMapOf<String, Path>()
+        listOf("index.json", "oracle.json", "source-manifest.toml").forEach { metadata ->
+            val file = Files.createFile(f.root.resolve("foreign-managed-" + metadata.replace('.', '-')),
+                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
+            Files.writeString(file, "{}")
+            managed["managed/$metadata"] = file
+        }
+        listOf("home", "workspace", "manifests", "transcripts").forEach { component ->
+            managed["managed/$component/tree.tar"] = f.extracted.resolve(tar.name)
+        }
+        val payloads = original.files.associate { it.name to f.extracted.resolve(it.name) } + managed
+        val capsuleId = "cap-fedcbafedcba"
+        val manifest = original.copy(id = capsuleId, managedFiles = managed.keys.toList(),
+            files = RecoveryCapsule.describe(payloads))
+        val capsuleRoot = Files.createDirectory(f.root.resolve("foreign-managed-capsule"),
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+        val archive = capsuleRoot.resolve("state.cap")
+        val key = f.custody.resolve("foreign-managed.key")
+        val verified = RecoveryCapsule.create(archive, key, manifest, payloads)
+        val extracted = f.root.resolve("foreign-managed-extracted")
+        RecoveryCapsule.extract(archive, key, capsuleId, source, manifest.bundleSha256, extracted) { Long.MAX_VALUE }
+        assertTrue(verified.authenticated)
+        assertFailsWith<IllegalArgumentException> { GenerationRecovery.validate(extracted, verified) }
+        assertTrue(f.fake.imports.isEmpty())
+    }
     @Test fun `recovered source binds exact bundle configurations ledgers and all volume roots`() = fixture { f ->
         val recovered = GenerationRecovery.validate(f.extracted, f.verified)
         assertEquals(f.bundle, recovered.bundle)
@@ -442,6 +496,13 @@ class GenerationRecoveryTest {
         val changed = f.bundle.members.first().let { it.copy(spec = it.spec.copy(processes = it.spec.processes.map { p -> p.copy(memoryMiB = 64) })) }
         assertFails { FoundationRestore.bundle(f.bundle.copy(members = listOf(changed) + f.bundle.members.drop(1)), inventory, target, f.verified.archiveSha256) }
         assertFails { FoundationRestore.bundle(f.bundle.copy(members = f.bundle.members.take(1)), inventory, target, f.verified.archiveSha256) }
+    }
+    @Test fun `authenticated payload validation bounds adversarial nested extraction before import`() = fixture { f ->
+        var nested = f.extracted
+        repeat(9) { nested = Files.createDirectory(nested.resolve("extra$it"),
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------"))) }
+        assertFailsWith<IllegalArgumentException> { GenerationRecovery.validate(f.extracted, f.verified) }
+        assertTrue(f.fake.imports.isEmpty())
     }
     @Test fun `changed plaintext extras symlinks and foreign observations fail before any import`() = fixture { f ->
         assertFails { GenerationRecovery.validate(f.extracted, f.verified.copy(manifestSha256 = "0".repeat(64))) }

@@ -58,6 +58,127 @@ internal object SeafileRuntime {
             }).also { PrivateDeployment.validate(it) }
     }
 
+    /** Seafile remains a single native storage cohort. Canonical MariaDB/Valkey are referenced, never copied. */
+    fun canonicalFragment(inventory: AcquiredInventory, name: String,
+        officeEnabled: Boolean = false): CanonicalProviderFragment {
+        val source = if (officeEnabled) OfficeRuntime.spec(inventory, name).let { office -> office.copy(
+            processes = office.processes.filterNot { it.id in setOf("office-state-init", "docservice", "office") },
+            volumes = office.volumes.filterNot { it.id == "office" }) } else spec(inventory, name)
+        val names = mapOf("schema-init" to "seafile-schema-init", "server" to "seafile-server",
+            "users-init" to "seafile-users-init", "backend" to "seafile-backend", "files" to "seafile-files")
+        val owned = source.processes.filter { it.id in names }.map { p ->
+            val isMigration = p.id == "schema-init"
+            p.copy(id = names.getValue(p.id),
+                dependencies = p.dependencies.filterNot { it in setOf("mariadb-init", "mariadb", "cache") }
+                    .map(names::getValue) + if (p.id == "schema-init") listOf("mariadb") else
+                        if (p.id == "server") listOf("valkey") else emptyList(),
+                volumes = p.volumes.map { it.copy(volume = "seafile-${it.volume}") },
+                files = p.files.map { it.copy(file = "seafile-${it.file}") } + if (p.id in setOf(
+                    "schema-init", "server", "users-init", "backend")) listOf(RuntimeFile(
+                    "seafile-mariadb-ca.pem", "/run/secrets/mariadb-ca.pem")) else emptyList(),
+                environmentFile = p.environmentFile?.let { if (isMigration) "seafile-migration.env" else "seafile-app.env" },
+                networks = when (p.id) {
+                    "files" -> listOf("seafile-data", "seafile-web") + if (officeEnabled) listOf("office-data") else emptyList()
+                    "backend" -> listOf("seafile-data") + if (officeEnabled) listOf("office-data") else emptyList()
+                    else -> listOf("seafile-data")
+                },
+                readiness = p.readiness.map { it.replace("backend:8000", "seafile-backend:8000") })
+        }
+        val volumes = source.volumes.filterNot { it.id in setOf("mariadb", "cache") }
+            .map { it.copy(id = "seafile-${it.id}") }
+        val accesses = owned.filter { it.id in setOf("seafile-schema-init", "seafile-server", "seafile-users-init",
+            "seafile-backend") }.flatMap { p -> listOf("ccnet_db", "seafile_db", "seahub_db").map { database ->
+            RuntimeDatabaseAccess(p.id, "mariadb", "mariadb", database,
+                if (p.id == "seafile-schema-init") "seafile_migrate" else "seafile_runtime",
+                requireNotNull(p.environmentFile), "seafile-data")
+        } }
+        return CanonicalProviderFragment("seafile", source.copy(store = RuntimeStore.CANONICAL_V2,
+            volumes = volumes, processes = owned, networks = listOf("seafile-data", "seafile-web") +
+                if (officeEnabled) listOf("office-data") else emptyList(),
+            databaseAccess = accesses), providerNetworks = mapOf("mariadb" to setOf("seafile-data"),
+                "valkey" to setOf("seafile-data")), webNetworks = setOf("seafile-web"))
+    }
+
+    /** After full pure graph admission: original native MariaDB schema/user secrets are split by authority. */
+    fun canonicalInputs(migrationPassword: String, runtimePassword: String, cachePassword: String,
+        mariaCa: String, office: Map<String, String>? = null,
+        pki: () -> Map<String, String> = { PrivateWebPki.generate("seafile-files",
+            dnsNames = listOf("seafile-files", "files.datamancy.net")) }): Map<String, String> {
+        require(listOf(migrationPassword, runtimePassword, cachePassword).distinct().size == 3 &&
+            listOf(migrationPassword, runtimePassword, cachePassword).all { it.matches(Regex("[a-f0-9]{64}")) } &&
+            mariaCa.startsWith("-----BEGIN CERTIFICATE-----\n") && mariaCa.trimEnd().endsWith("-----END CERTIFICATE-----"))
+        val files = (if (office == null) inputs(pki) else office).toMutableMap()
+        require(files.containsKey("app.env") && files.containsKey("schema.py") && files.containsKey("seahub-settings.py"))
+        val original = files.getValue("app.env")
+        val runtime = original.lineSequence().filter { it.isNotBlank() }.joinToString("\n", postfix = "\n") { line ->
+            when (line.substringBefore('=')) {
+                "SEAFILE_MYSQL_DB_USER" -> "SEAFILE_MYSQL_DB_USER=seafile_runtime"
+                "SEAFILE_MYSQL_DB_PASSWORD" -> "SEAFILE_MYSQL_DB_PASSWORD=$runtimePassword"
+                "SEAFILE_MYSQL_DB_HOST" -> "SEAFILE_MYSQL_DB_HOST=mariadb"
+                "REDIS_HOST" -> "REDIS_HOST=valkey"
+                "REDIS_PASSWORD" -> "REDIS_PASSWORD=$cachePassword"
+                "SEAFILE_SERVER_HOSTNAME" -> "SEAFILE_SERVER_HOSTNAME=files.datamancy.net"
+                "SEAFILE_SERVER_PROTOCOL" -> "SEAFILE_SERVER_PROTOCOL=https"
+                else -> line
+            }
+        } + "REDIS_USERNAME=seafile\nCACHE_KEY_PREFIX=app:seafile:\nMARIADB_SSL_CA=/run/secrets/mariadb-ca.pem\n"
+        val migration = runtime.lineSequence().filter { line -> line.substringBefore('=') in setOf(
+            "PYTHONDONTWRITEBYTECODE", "HOME", "PYTHONPATH", "LD_LIBRARY_PATH", "SEAFILE_MYSQL_DB_HOST",
+            "SEAFILE_MYSQL_DB_PORT", "SEAFILE_MYSQL_DB_USER", "SEAFILE_MYSQL_DB_PASSWORD", "MARIADB_SSL_CA") }
+            .joinToString("\n", postfix = "\n")
+            .replace("SEAFILE_MYSQL_DB_USER=seafile_runtime", "SEAFILE_MYSQL_DB_USER=seafile_migrate")
+            .replace("SEAFILE_MYSQL_DB_PASSWORD=$runtimePassword", "SEAFILE_MYSQL_DB_PASSWORD=$migrationPassword")
+        require(migration != runtime && !runtime.contains(migrationPassword))
+        files["app.env"] = runtime
+        files["migration.env"] = migration
+        files["mariadb-ca.pem"] = mariaCa
+        files["schema.py"] = files.getValue("schema.py")
+            .replace("user='seafile',password=", "user='seafile_migrate',password=")
+            .replace("password=os.environ['SEAFILE_MYSQL_DB_PASSWORD'],database=name)",
+                "password=os.environ['SEAFILE_MYSQL_DB_PASSWORD'],database=name,ssl={'ca':'/run/secrets/mariadb-ca.pem'},ssl_verify_cert=True,ssl_verify_identity=True)")
+        files["seahub-settings.py"] = files.getValue("seahub-settings.py")
+            .replace("'USER':'seafile'", "'USER':'seafile_runtime'")
+            .replace("https://office:8443/", "https://office.datamancy.net/")
+            .replace("'HOST':'mariadb','PORT':'3306'", "'HOST':'mariadb','PORT':'3306','OPTIONS':{'ssl':{'ca':'/run/secrets/mariadb-ca.pem'}}")
+            .replace("ALLOWED_HOSTS=['files','backend','127.0.0.1']", "ALLOWED_HOSTS=['files.datamancy.net','seafile-files','seafile-backend','127.0.0.1']")
+            .replace("CSRF_TRUSTED_ORIGINS=['https://files:8443']", "CSRF_TRUSTED_ORIGINS=['https://files.datamancy.net']")
+        files["nginx.conf"] = files.getValue("nginx.conf").replace("server_name files;", "server_name seafile-files;")
+            .replace("backend:8082", "seafile-backend:8082").replace("backend:8000", "seafile-backend:8000")
+        files["seafile.conf"] = files.getValue("seafile.conf") +
+            "\n[database]\nssl_ca=/run/secrets/mariadb-ca.pem\nssl_verify_cert=true\n"
+        if (office != null) files["office-callback-guard.py"] = files.getValue("office-callback-guard.py")
+            .replace("url.netloc!='office:8443'", "url.netloc not in ('onlyoffice-front:8443','office.datamancy.net')")
+        files.remove("mariadb.env"); files.remove("cache.conf")
+        files.keys.filterNot { it in setOf("app.env", "migration.env", "mariadb-ca.pem", "seafile.conf",
+            "seahub-settings.py", "users.json", "users.py", "schema.py", "process-init.py",
+            "seafile-web.py", "nginx.conf", "ca.pem", "web.pem", "web-key.pem",
+            "office-callback-guard.py", "office-ca-bundle.pem") }.forEach(files::remove)
+        return files.mapKeys { (file, _) -> if (file == "migration.env") "seafile-migration.env"
+            else "seafile-$file" }
+    }
+
+    /** No generic bootstrap stripping: retire precisely the original native schema/users pair. */
+    fun coldRestoreFragment(fresh: CanonicalProviderFragment): CanonicalProviderFragment {
+        require(fresh.product == "seafile" && fresh.spec.processes.map { it.id }.toSet() ==
+            setOf("seafile-schema-init", "seafile-server", "seafile-users-init", "seafile-backend", "seafile-files"))
+        val boot = setOf("seafile-schema-init", "seafile-users-init")
+        require(fresh.spec.processes.filter { it.oneShot }.map { it.id }.toSet() == boot)
+        val byId = fresh.spec.processes.associateBy { it.id }
+        fun dep(id: String): List<String> = if (id in boot) byId.getValue(id).dependencies.flatMap(::dep) else listOf(id)
+        val active = fresh.spec.processes.filterNot { it.oneShot }.map { p ->
+            val stable = p.copy(dependencies = p.dependencies.flatMap(::dep).distinct())
+            if (p.id != "seafile-server") stable else {
+                require(p.entrypoint == "/usr/bin/python3" && p.command.first() == "/run/secrets/process-init.py")
+                stable.copy(entrypoint = "/bin/sh", command = listOf("-ec",
+                    "test -d /state/seafile-data; test ! -L /state/seafile-data; " +
+                    "test -s /state/conf/seahub_settings.py; test ! -L /state/conf/seahub_settings.py; " +
+                    "exec /usr/bin/python3 \"${'$'}@\"", "restored-seafile") + p.command)
+            }
+        }
+        return fresh.copy(spec = fresh.spec.copy(processes = active,
+            databaseAccess = fresh.spec.databaseAccess.filterNot { it.consumer in boot }))
+    }
+
     /** The provider provisions seafile's three databases and isolated cache credential, never a root login. */
     fun applicationInputs(databasePassword: String, cachePassword: String,
         pki: () -> Map<String, String> = { PrivateWebPki.generate("files") }): Map<String, String> {

@@ -23,6 +23,9 @@ class OpenBaoRuntimeTest {
         assertContains(inputs.getValue("bao.env"), "BAO_CACERT=/run/secrets/ca.pem")
         assertFalse(inputs.values.any { "root_token" in it || "unseal" in it || "dev-root-token" in it })
         assertContains(process.readiness.last(), "code -eq 2") // Explicit sealed API availability, not operational health.
+        assertContains(process.readiness.last(), "code -eq 1") // Fresh uninitialized first-install can be explicitly initialized later.
+        assertContains(process.readiness.last(), "initialized")
+        assertContains(process.readiness.last(), "sealed")
         assertFails { OpenBaoRuntime.spec(inventory.copy(images = emptyList())) }
         assertFails { OpenBaoRuntime.spec(inventory.copy(images = inventory.images.map { it.copy(os = "windows") })) }
     }

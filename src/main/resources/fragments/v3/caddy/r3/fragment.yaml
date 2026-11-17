@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 2,
+  "id": "private-caddy",
+  "revision": 3,
+  "product": "caddy",
+  "artifacts": [
+    "caddy"
+  ],
+  "networks": [
+    "ingress-control",
+    "identity-web"
+  ],
+  "volumes": [
+    {
+      "id": "caddy-data",
+      "userId": 1000
+    },
+    {
+      "id": "caddy-config",
+      "userId": 1000
+    }
+  ],
+  "inputs": [
+    {
+      "name": "caddy.env",
+      "owner": "caddy",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "caddy"
+      ]
+    },
+    {
+      "name": "caddy.json",
+      "owner": "caddy",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "caddy"
+      ]
+    },
+    {
+      "name": "opensearch-reader.pem",
+      "owner": "opensearch",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "caddy"
+      ]
+    },
+    {
+      "name": "opensearch-reader-key.pem",
+      "owner": "opensearch",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "caddy"
+      ]
+    },
+    {
+      "name": "identity-web.pem",
+      "owner": "keycloak",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "caddy"
+      ]
+    },
+    {
+      "name": "identity-web-key.pem",
+      "owner": "keycloak",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "caddy"
+      ]
+    }
+  ],
+  "processes": [
+    {
+      "id": "caddy",
+      "artifact": "caddy",
+      "userId": 1000,
+      "memoryMiB": 256,
+      "networks": [
+        "ingress-control",
+        "identity-web"
+      ],
+      "volumes": [
+        {
+          "volume": "caddy-data",
+          "target": "/data"
+        },
+        {
+          "volume": "caddy-config",
+          "target": "/config"
+        }
+      ],
+      "entrypoint": "/usr/bin/caddy",
+      "command": [
+        "run",
+        "--config",
+        "/run/secrets/caddy.json"
+      ],
+      "environmentFile": "caddy.env",
+      "files": [
+        {
+          "file": "caddy.json",
+          "target": "/run/secrets/caddy.json"
+        },
+        {
+          "file": "opensearch-reader.pem",
+          "target": "/run/secrets/opensearch-reader.pem"
+        },
+        {
+          "file": "opensearch-reader-key.pem",
+          "target": "/run/secrets/opensearch-reader-key.pem"
+        },
+        {
+          "file": "identity-web.pem",
+          "target": "/run/secrets/identity-web.pem"
+        },
+        {
+          "file": "identity-web-key.pem",
+          "target": "/run/secrets/identity-web-key.pem"
+        }
+      ],
+      "readiness": [
+        "/usr/bin/wget",
+        "-q",
+        "-O",
+        "/dev/null",
+        "http://127.0.0.1:2019/config/"
+      ],
+      "networkAliases": [
+        {
+          "network": "identity-web",
+          "host": "auth.datamancy.net"
+        }
+      ]
+    }
+  ],
+  "install": {
+    "processes": [
+      "caddy"
+    ],
+    "dependencies": {
+      "caddy": [
+        "keycloak"
+      ]
+    }
+  },
+  "restore": {
+    "processes": [
+      "caddy"
+    ],
+    "dependencies": {
+      "caddy": [
+        "keycloak"
+      ]
+    }
+  },
+  "providers": [
+    "opensearch",
+    "keycloak"
+  ],
+  "providerNetworks": {
+    "keycloak": [
+      "identity-web"
+    ]
+  },
+  "providerProcesses": {
+    "keycloak": [
+      "keycloak"
+    ]
+  }
+}

@@ -9,7 +9,7 @@ class LiveKitRuntimeTest {
     private val inventory = AcquiredInventory(1, "candidate", listOf("livekit", "element").map {
         AcquiredImage(it, "upstream", "example.org/app:1", image, "b".repeat(64), emptyList(), image.substringAfter('@'), "amd64", "linux")
     })
-    @Test fun `stateless recovery preserves keys refuses changed inputs and rejects unsupported source recipes`() {
+    @Test fun `stateless recovery preserves keys refuses changed inputs and rejects unsupported source recipes`() : Unit {
         val base = Files.createTempDirectory("p0v3-rtc-test-")
         try {
             val source = LiveKitRuntime.spec(inventory)
@@ -32,7 +32,7 @@ class LiveKitRuntimeTest {
             assertFails { LiveKitRuntime.prepareRestore(inventory, recovered, "restored", base) }
         } finally { Files.walk(base).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
     }
-    @Test fun `authenticated bounded private SFU with no persistent room fiction`() {
+    @Test fun `authenticated bounded private SFU with no persistent room fiction`() : Unit {
         val spec = LiveKitRuntime.spec(inventory)
         assertEquals(listOf("livekit", "rtc"), PrivateDeployment.validate(spec).map { it.id })
         assertTrue(spec.volumes.isEmpty())

@@ -60,6 +60,36 @@ class SiteOwnershipTest {
                 Json.decodeFromString<AssemblyRequest>(Json.encodeToString(isolated.summary.request)))
         } finally { Files.walk(root).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
     }
+    @Test fun `historical load used by capture rejects forged sealed ownership even without live input recheck`() {
+        val root = Files.createTempDirectory("historical-owned-capture-unit-")
+        val runtime = Files.createDirectory(root.resolve("runtimes"),
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+        val assembly = GenerationAssembly().plan(request.copy(store = RuntimeStore.CANONICAL_V2), inventory)
+        val engine = GenerationRuntime(root.resolve("generations"), runtime,
+            { error("No runtime effects permitted") }, { error("No capacity effects permitted") })
+        try {
+            val sealedHash = engine.prepareOwnedAssembly(assembly, contract(assembly), setOf(host))
+            val path = root.resolve("generations/${request.id}/bundle.json")
+            val original = Json.decodeFromString<GenerationBundle>(Files.readString(path))
+            // The same historical load(false) boundary is used by cold capture,
+            // retired capacity, and isolated source inspection. Reflection keeps
+            // this unit fixture on that exact private gate, not a weaker surrogate.
+            val historical = GenerationRuntime::class.java.declaredMethods.single {
+                it.name == "load" && it.parameterCount == 3
+            }.apply { isAccessible = true }
+            assertNotNull(historical.invoke(engine, request.id, sealedHash, false))
+            val contract = requireNotNull(original.ownership).contract
+            val forged = original.copy(ownership = original.ownership.copy(contract = contract.copy(
+                processes = contract.processes.mapIndexed { index, owner ->
+                    if (index == 0) owner.copy(product = "ntfy") else owner
+                })))
+            val forgedBytes = Json { encodeDefaults = true }.encodeToString(forged).toByteArray()
+            Files.write(path, forgedBytes) // Isolated unit fixture only: attacker knows its new hash.
+            assertFails { historical.invoke(engine, request.id, ReleaseLocks.sha256(forgedBytes), false) }
+        } finally {
+            Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) }
+        }
+    }
     @Test fun `exact compiled ownership reports remaining release gaps without claiming execution`() {
         val value = contract()
         assertEquals(value, SiteOwnerships.decode(Json.encodeToString(value).toByteArray()))
@@ -145,7 +175,9 @@ class SiteOwnershipTest {
     }
     @Test fun `all nonconflicting recipes expose real duplicated services without preparing credentials`() {
         val bytes = GenerationAssembly.readInventory(Path.of("release/downloaded-candidate-inventory.json"))
-        val excluded = setOf("canonical-core", "canonical-providers", "caddy", "openbao", "seafile", "sogo", "mail", "synapse", "matrix", "matrix-rtc", "knowledge-identity")
+        val excluded = setOf("canonical-core", "canonical-providers", "caddy", "openbao", "seafile", "sogo", "mail", "synapse", "matrix", "matrix-rtc", "knowledge-identity", CanonicalSharedYamlGraph.RECIPE,
+            CanonicalSharedYamlGraph.R9_ASSEMBLY_RECIPE,
+            CanonicalSharedYamlGraph.R10_ASSEMBLY_RECIPE) + FragmentRecipes.recipeIds
         val all = GenerationAssembly().plan(request.copy(inventorySha256 = ReleaseLocks.sha256(bytes), diskReservationMiB = 131072,
             selections = GenerationAssembly.catalog.filterNot { it.id in excluded }.map { AssemblySelection(it.id) }), bytes)
         val report = SiteOwnerships.inspect(all)
@@ -179,8 +211,17 @@ class SiteOwnershipTest {
     }
     @Test fun `role catalog is exact for every compiled recipe including alternative composites`() {
         val bytes = GenerationAssembly.readInventory(Path.of("release/downloaded-candidate-inventory.json"))
-        assertEquals(GenerationAssembly.catalog.map { it.id }.toSet(), CompiledProcessOwners.recipes.keys)
-        for (recipe in GenerationAssembly.catalog) {
+        // Pending full r9 roles are derived from the exact checked generation
+        // fragment binding, not the active r7 static role table.
+        assertEquals(GenerationAssembly.catalog.map { it.id }.toSet() -
+            setOf(CanonicalSharedYamlGraph.R9_ASSEMBLY_RECIPE,
+                CanonicalSharedYamlGraph.R10_ASSEMBLY_RECIPE), CompiledProcessOwners.recipes.keys)
+        // The repository inventory predates Timescale; new packaged ownership is tested with an
+        // explicit unit-only artifact fixture in FragmentAssemblyTest, never a relabelled live image.
+        for (recipe in GenerationAssembly.catalog.filter { it.id !in FragmentRecipes.recipeIds &&
+            it.id != CanonicalSharedYamlGraph.RECIPE &&
+            it.id !in setOf(CanonicalSharedYamlGraph.R9_ASSEMBLY_RECIPE,
+                CanonicalSharedYamlGraph.R10_ASSEMBLY_RECIPE) }) {
             val p = GenerationAssembly().plan(request.copy(inventorySha256 = ReleaseLocks.sha256(bytes), diskReservationMiB = 131072,
                 selections = listOf(AssemblySelection(recipe.id))), bytes)
             val roles = CompiledProcessOwners.recipes.getValue(recipe.id)

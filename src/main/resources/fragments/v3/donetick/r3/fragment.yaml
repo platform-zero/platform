@@ -1,0 +1,60 @@
+schemaVersion: 2
+id: private-donetick
+revision: 3
+product: donetick
+artifacts: [donetick]
+providers: [caddy]
+networks: [donetick-web, donetick-enroll]
+providerNetworks:
+  caddy: [donetick-web]
+webNetworks: [donetick-web]
+volumes:
+  - {id: donetick-data, userId: 1000}
+inputs:
+  - {name: donetick-runtime.env, owner: donetick, purpose: RUNTIME, consumers: [donetick]}
+  - {name: donetick-selfhosted.yaml, owner: donetick, purpose: RUNTIME, consumers: [donetick]}
+  - {name: donetick-actor-enroll.env, owner: donetick, purpose: BOOTSTRAP, consumers: [donetick-actors-init]}
+  - {name: donetick-actor-enroll.yaml, owner: donetick, purpose: BOOTSTRAP, consumers: [donetick-actors-init]}
+  - {name: donetick-actor-enroll.sh, owner: donetick, purpose: BOOTSTRAP, consumers: [donetick-actors-init]}
+  - {name: donetick-owner-signup.json, owner: donetick, purpose: BOOTSTRAP, consumers: [donetick-actors-init]}
+  - {name: donetick-outsider-signup.json, owner: donetick, purpose: BOOTSTRAP, consumers: [donetick-actors-init]}
+  - {name: donetick-app-nonmember-signup.json, owner: donetick, purpose: BOOTSTRAP, consumers: [donetick-actors-init]}
+processes:
+  - id: donetick-actors-init
+    artifact: donetick
+    userId: 1000
+    memoryMiB: 512
+    oneShot: true
+    networks: [donetick-enroll]
+    entrypoint: /bin/sh
+    command: [-ec, 'exec /bin/sh /run/secrets/donetick-actor-enroll.sh']
+    environmentFile: donetick-actor-enroll.env
+    files:
+      - {file: donetick-actor-enroll.yaml, target: /config/selfhosted.yaml}
+      - {file: donetick-actor-enroll.sh, target: /run/secrets/donetick-actor-enroll.sh}
+      - {file: donetick-owner-signup.json, target: /run/secrets/donetick-owner-signup.json}
+      - {file: donetick-outsider-signup.json, target: /run/secrets/donetick-outsider-signup.json}
+      - {file: donetick-app-nonmember-signup.json, target: /run/secrets/donetick-app-nonmember-signup.json}
+    volumes:
+      - {volume: donetick-data, target: /donetick-data}
+  - id: donetick
+    artifact: donetick
+    userId: 1000
+    memoryMiB: 512
+    networks: [donetick-web]
+    entrypoint: /donetick
+    environmentFile: donetick-runtime.env
+    files:
+      - {file: donetick-selfhosted.yaml, target: /config/selfhosted.yaml}
+    volumes:
+      - {volume: donetick-data, target: /donetick-data}
+    readinessHttpPort: 2021
+install:
+  processes: [donetick-actors-init, donetick]
+  dependencies:
+    donetick-actors-init: []
+    donetick: [donetick-actors-init, caddy]
+restore:
+  processes: [donetick]
+  dependencies:
+    donetick: [caddy]

@@ -3,6 +3,10 @@ package net.datamancy.platform
 import java.nio.file.Path
 import kotlinx.serialization.Serializable
 
+internal interface OwnedMigrationGenerationBackend {
+    fun startMigrationDatabase(spec: PrivateDeploymentSpec, fence: String): List<RuntimeStatus>
+    fun startOwnedAfterMigration(spec: PrivateDeploymentSpec, fence: String): List<RuntimeStatus>
+}
 internal interface BackupGenerationFactory {
     fun forBackup(access: RuntimeBackupAccess): BackupGenerationBackend
 }
@@ -17,7 +21,8 @@ internal interface BackupGenerationBackend : GenerationBackend, ColdGenerationBa
 
 /** Uses the same audited runtime for staging, capture, import and operation-bound routine backup. */
 internal class NativeGenerationBackend(private val bindings: Map<String, String>, private val access: RuntimeBackupAccess? = null) :
-    GenerationBackend, ColdGenerationBackend, GenerationImportBackend, GenerationRestoreStartupBackend, BackupGenerationFactory, BackupGenerationBackend {
+    GenerationBackend, ColdGenerationBackend, GenerationImportBackend, GenerationRestoreStartupBackend,
+    OwnedMigrationGenerationBackend, BackupGenerationFactory, BackupGenerationBackend {
     private val runtime = PrivateDeployment.real(bindings, access)
     override fun forBackup(access: RuntimeBackupAccess) = NativeGenerationBackend(bindings, access)
     override fun audit(spec: PrivateDeploymentSpec, pristine: Boolean) = runtime.audit(spec, pristine)
@@ -30,9 +35,15 @@ internal class NativeGenerationBackend(private val bindings: Map<String, String>
     override fun importCold(spec: PrivateDeploymentSpec, archives: Map<String, Path>, sourceArchiveSha256: String, verificationRoot: Path, expectedHashes: Map<String, String>) =
         runtime.importCold(spec, archives, sourceArchiveSha256, verificationRoot, expectedHashes)
     override fun startImported(spec: PrivateDeploymentSpec, fence: String) = runtime.startImported(spec, fence)
+    override fun startMigrationDatabase(spec: PrivateDeploymentSpec, fence: String) =
+        runtime.startImportedMigrationDatabase(spec, fence)
+    override fun startOwnedAfterMigration(spec: PrivateDeploymentSpec, fence: String) =
+        runtime.startImportedOwned(spec, fence)
     override fun <T> withFrozen(spec: PrivateDeploymentSpec, fence: String, action: (FrozenRuntimeObservation) -> T): T =
         runtime.withFrozen(spec, fence, action)
     override fun exportVolume(spec: PrivateDeploymentSpec, volume: RuntimeVolume, output: Path) = ColdVolumeExport.export(spec, volume, output)
+    override fun exportVolume(spec: PrivateDeploymentSpec, volume: RuntimeVolume, output: Path, maximumBytes: Long) =
+        ColdVolumeExport.export(spec, volume, output, maximumBytes = maximumBytes)
     override fun claim(spec: PrivateDeploymentSpec) = runtime.claimBackup(spec)
     override fun quiesce(spec: PrivateDeploymentSpec) = runtime.enterMaintenance(spec, "backup").id
     override fun resume(spec: PrivateDeploymentSpec, fence: String): List<RuntimeStatus> {

@@ -31,6 +31,24 @@ class NodeMetricsRecoveryTest {
         assertFails { NodeMetricsRecovery.spec(source.copy(processes = source.processes.drop(1)), inventory, "other", "a".repeat(64)) }
         assertFails { NodeMetricsRecovery.spec(source, inventory, "../bad", "a".repeat(64)) }
     }
+    @Test fun `six product canonical recovery retains original volumes and never reruns exporter seed`() {
+        val extra = listOf("alertmanager", "loki", "alloy", "grafana").map { product -> AcquiredImage(
+            product, "upstream", "example.org/$product:1", "example.org/$product@sha256:" + "a".repeat(64),
+            "b".repeat(64), emptyList(), "sha256:" + "a".repeat(64), "amd64", "linux") }
+        val all = inventory.copy(images = inventory.images + extra)
+        val original = ObservabilityRuntime.canonicalSpec(all, "original").copy(store = RuntimeStore.CANONICAL_V2)
+        val projected = ObservabilityRuntime.recoveredSpec(original, all, "restored", "a".repeat(64))
+        assertEquals(original.volumes, projected.volumes)
+        assertEquals(original.processes.drop(2), projected.processes.drop(1))
+        assertEquals(SingleUserRestore.inputNames(original) - "fixture.prom", SingleUserRestore.inputNames(projected))
+        assertEquals(emptyList(), projected.processes.single { it.id == "node" }.dependencies)
+        assertTrue(projected.processes.none { it.oneShot || it.id == "metrics-init" })
+        assertTrue(projected.processes.none { process -> process.command.any { "cp " in it } })
+        assertFails { ObservabilityRuntime.recoveredSpec(original, all, "original", "a".repeat(64)) }
+        assertFails { ObservabilityRuntime.recoveredSpec(original.copy(processes = original.processes.drop(1)), all,
+            "other", "a".repeat(64)) }
+        assertFails { ObservabilityRuntime.recoveredSpec(original, all, "other", "unsafe") }
+    }
     @Test fun `recovered inputs stay private exact and immutable across preparation`() {
         val root = Files.createTempDirectory("metrics-restore-unit")
         fun private(path: Path, text: String) { Files.writeString(path, text); Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-------")) }

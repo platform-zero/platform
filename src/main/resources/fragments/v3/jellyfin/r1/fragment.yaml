@@ -1,0 +1,58 @@
+schemaVersion: 2
+id: private-jellyfin
+revision: 1
+product: jellyfin
+artifacts: [jellyfin]
+providers: [caddy]
+networks: [media-data, media-web]
+providerNetworks:
+  caddy: [media-web]
+webNetworks: [media-web]
+volumes:
+  - {id: jellyfin-config, userId: 1000}
+  - {id: jellyfin-cache, userId: 1000}
+  - {id: jellyfin-media, userId: 1000}
+inputs:
+  - {name: jellyfin-system.xml, owner: jellyfin, purpose: BOOTSTRAP, consumers: [jellyfin-media-init]}
+  - {name: jellyfin-jellyfin.env, owner: jellyfin, purpose: RUNTIME, consumers: [jellyfin]}
+processes:
+  - id: jellyfin-media-init
+    artifact: jellyfin
+    userId: 1000
+    oneShot: true
+    memoryMiB: 512
+    networks: [media-data]
+    entrypoint: /bin/sh
+    volumes:
+      - {volume: jellyfin-media, target: /media}
+      - {volume: jellyfin-config, target: /config}
+    files:
+      - {file: jellyfin-system.xml, target: /run/secrets/system.xml}
+    command:
+      - -ec
+      - >-
+        mkdir -p /config/config && test ! -e /config/config/system.xml &&
+        cp /run/secrets/system.xml /config/config/system.xml && chmod 600 /config/config/system.xml &&
+        exec /usr/lib/jellyfin-ffmpeg/ffmpeg -nostdin -n -f lavfi -i sine=frequency=440:duration=3 -metadata 'title=Platform Zero private tone' -metadata 'artist=Generated fixture' -c:a pcm_s16le /media/private-tone.wav
+  - id: jellyfin
+    artifact: jellyfin
+    userId: 1000
+    memoryMiB: 2048
+    networks: [media-data, media-web]
+    entrypoint: /jellyfin/jellyfin
+    environmentFile: jellyfin-jellyfin.env
+    volumes:
+      - {volume: jellyfin-config, target: /config}
+      - {volume: jellyfin-cache, target: /cache}
+      - {volume: jellyfin-media, target: /media}
+    readinessHttpPort: 8096
+    readinessHttpPath: /Users/Public
+install:
+  processes: [jellyfin-media-init, jellyfin]
+  dependencies:
+    jellyfin-media-init: []
+    jellyfin: [jellyfin-media-init, caddy]
+restore:
+  processes: [jellyfin]
+  dependencies:
+    jellyfin: [caddy]

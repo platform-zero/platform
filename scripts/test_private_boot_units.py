@@ -34,6 +34,18 @@ class PrivateBootUnitsTest(unittest.TestCase):
             (root / 'lib/unit.jar').rename(root / 'lib/other.jar')
             self.assertNotEqual(boot.distribution(root)[0], digest)
 
+    def test_original_signed_input_asset_is_part_of_platform_descriptor_without_reencoding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.fixture(root)
+            original = b'{"schemaVersion":2,"body":{"original":"synthetic fixture only"}}'
+            (root / 'lib/qualification-inputs-v2.json').write_bytes(original)
+            digest, files, descriptor = boot.distribution(root)
+            self.assertEqual(files['lib/qualification-inputs-v2.json'], (0o644, original))
+            self.assertIn(b'qualification-inputs-v2.json', descriptor)
+            (root / 'lib/qualification-inputs-v2.json').write_bytes(original + b' ')
+            self.assertNotEqual(boot.distribution(root)[0], digest)
+
     def test_distribution_rejects_symlinks_extra_directories_and_missing_launcher(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -87,6 +99,64 @@ class PrivateBootUnitsTest(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     boot.root_directory(path)
                 command.assert_not_called()
+
+    def test_qualification_publisher_is_disjoint_from_boot_changes_and_uses_pinned_root_cli(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dist = root / 'dist'
+            dist.mkdir()
+            self.fixture(dist)
+            digest, files, descriptor = boot.distribution(dist)
+            release = root / 'supervision/releases' / digest
+            calls = []
+            with patch.object(boot, 'DIST', dist), patch.object(boot, 'SUPERVISION', root / 'supervision'), \
+                 patch.object(boot, 'same_root_file', return_value=True), \
+                 patch.object(boot, 'call', side_effect=lambda args: calls.append(args) or b'{"path":"unit-only"}'), \
+                 patch.object(sys, 'argv', ['unit-only', '--qualification-publish',
+                     '/mnt/media/p0-v3/qualification-publication/artifacts.request.json']):
+                boot.main()
+            self.assertEqual(calls, [['sudo', '-n', str(release / 'bin/p0-v3-platform'),
+                'qualification', 'publish-artifacts',
+                '/mnt/media/p0-v3/qualification-publication/artifacts.request.json']])
+            with patch.object(boot, 'DIST', dist), patch.object(boot, 'SUPERVISION', root / 'supervision'), \
+                 patch.object(boot, 'same_root_file', return_value=True), patch.object(boot, 'call') as command, \
+                 patch.object(sys, 'argv', ['unit-only', '--qualification-publish',
+                     '/mnt/media/p0-v3/qualification-publication/artifacts.request.json', 'unit']):
+                with self.assertRaises(AssertionError):
+                    boot.main()
+                command.assert_not_called()
+
+    def test_controller_only_preserves_original_intent_and_never_installs_or_starts_units(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dist = root / 'dist'; dist.mkdir()
+            self.fixture(dist)
+            receipts = root / 'receipts'; receipts.mkdir(mode=0o700)
+            supervision = root / 'supervision'
+            calls = []
+            def command(args, **kwargs):
+                calls.append(args)
+                self.assertEqual(args[:5], ['sudo', '-n', '/usr/bin/python3', '-I', '-c'])
+                source, destination = Path(args[6]), Path(args[7])
+                destination.write_bytes(source.read_bytes())
+                destination.chmod(int(args[9], 8))
+                return b''
+            def same(path, content, mode):
+                self.assertEqual(path.read_bytes(), content)
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), mode)
+                return True
+            with patch.object(boot, 'DIST', dist), patch.object(boot, 'call', side_effect=command), \
+                 patch.object(boot, 'root_directory', side_effect=lambda path: path.mkdir(mode=0o755, exist_ok=True)), \
+                 patch.object(boot, 'same_root_file', side_effect=same), patch('builtins.print'):
+                boot.stage_controller_only(receipts, supervision)
+                with self.assertRaises(AssertionError):
+                    boot.stage_controller_only(receipts, supervision)
+            self.assertTrue(calls)
+            self.assertTrue(all('systemctl' not in str(args) for args in calls))
+            evidence = list(receipts.glob('quadlet-controller-*'))
+            self.assertEqual(len(evidence), 1)
+            self.assertTrue((evidence[0] / 'stage.intent.json').exists())
+            self.assertTrue((evidence[0] / 'stage.result.json').exists())
 
     def test_optimized_interpreter_is_rejected_before_effects(self):
         result = subprocess.run([sys.executable, '-O', str(Path(boot.__file__)), '--help'], capture_output=True)

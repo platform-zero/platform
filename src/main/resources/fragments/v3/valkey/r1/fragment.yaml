@@ -1,0 +1,39 @@
+schemaVersion: 2
+id: shared-valkey
+revision: 1
+product: valkey
+artifacts: [valkey]
+networks: [cache-private]
+volumes:
+  - {id: valkey, userId: 999}
+inputs:
+  - name: valkey.conf
+    owner: valkey
+    purpose: RUNTIME
+    consumers: [valkey]
+processes:
+  - id: valkey
+    artifact: valkey
+    userId: 999
+    memoryMiB: 256
+    entrypoint: /usr/local/bin/valkey-server
+    command: [/etc/valkey/valkey.conf]
+    networks: [cache-private]
+    volumes:
+      - {volume: valkey, target: /data}
+    files:
+      - {file: valkey.conf, target: /etc/valkey/valkey.conf}
+    readiness:
+      - /bin/sh
+      - -ec
+      - |
+        export REDISCLI_AUTH="$(sed -n 's/^requirepass //p' /etc/valkey/valkey.conf)"
+        test "$(valkey-cli ping)" = PONG
+install:
+  processes: [valkey]
+  dependencies:
+    valkey: []
+restore:
+  processes: [valkey]
+  dependencies:
+    valkey: []

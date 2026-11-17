@@ -1,0 +1,90 @@
+schemaVersion: 2
+id: private-onlyoffice
+revision: 1
+product: onlyoffice
+artifacts: [onlyoffice]
+providers: [caddy, seafile]
+providerProcesses:
+  seafile: [seafile-files]
+networks: [office-data, onlyoffice-web]
+providerNetworks:
+  caddy: [onlyoffice-web]
+  seafile: [office-data]
+webNetworks: [onlyoffice-web]
+exportedInputs: [onlyoffice-office-ca.pem]
+volumes:
+  - {id: onlyoffice-office, userId: 1000}
+inputs:
+  - {name: onlyoffice-office.env, owner: onlyoffice, purpose: RUNTIME, consumers: [onlyoffice-state-init, onlyoffice-docservice]}
+  - {name: onlyoffice-office.json, owner: onlyoffice, purpose: RUNTIME, consumers: [onlyoffice-state-init, onlyoffice-docservice]}
+  - {name: onlyoffice-office-log.json, owner: onlyoffice, purpose: RUNTIME, consumers: [onlyoffice-state-init, onlyoffice-docservice]}
+  - {name: seafile-ca.pem, owner: seafile, purpose: RUNTIME, consumers: [onlyoffice-state-init, onlyoffice-docservice]}
+  - {name: onlyoffice-process-init.py, owner: onlyoffice, purpose: RUNTIME, consumers: [onlyoffice-state-init, onlyoffice-docservice]}
+  - {name: onlyoffice-office-nginx.conf, owner: onlyoffice, purpose: RUNTIME, consumers: [onlyoffice-front]}
+  - {name: onlyoffice-office-ca.pem, owner: onlyoffice, purpose: RUNTIME, consumers: [onlyoffice-front]}
+  - {name: onlyoffice-office-web.pem, owner: onlyoffice, purpose: RUNTIME, consumers: [onlyoffice-front]}
+  - {name: onlyoffice-office-web-key.pem, owner: onlyoffice, purpose: RUNTIME, consumers: [onlyoffice-front]}
+processes:
+  - id: onlyoffice-state-init
+    artifact: onlyoffice
+    userId: 1000
+    oneShot: true
+    memoryMiB: 2048
+    networks: [office-data]
+    entrypoint: /bin/sh
+    command: [-ec, 'test -z "$(ls -A /state)"; umask 077; mkdir -p /state/cache/files /state/logs; sync']
+    environmentFile: onlyoffice-office.env
+    volumes:
+      - {volume: onlyoffice-office, target: /state}
+    files:
+      - {file: onlyoffice-office.json, target: /run/office/local.json}
+      - {file: onlyoffice-office-log.json, target: /run/office/log.json}
+      - {file: seafile-ca.pem, target: /run/secrets/ca.pem}
+      - {file: onlyoffice-process-init.py, target: /run/secrets/process-init.py}
+  - id: onlyoffice-docservice
+    artifact: onlyoffice
+    userId: 1000
+    memoryMiB: 2048
+    networks: [office-data, onlyoffice-web]
+    entrypoint: /bin/sh
+    command: [-ec, 'cd /var/www/onlyoffice/documentserver/server/DocService; exec /usr/bin/python3 /run/secrets/process-init.py /var/www/onlyoffice/documentserver/server/DocService/docservice']
+    environmentFile: onlyoffice-office.env
+    volumes:
+      - {volume: onlyoffice-office, target: /state}
+    files:
+      - {file: onlyoffice-office.json, target: /run/office/local.json}
+      - {file: onlyoffice-office-log.json, target: /run/office/log.json}
+      - {file: seafile-ca.pem, target: /run/secrets/ca.pem}
+      - {file: onlyoffice-process-init.py, target: /run/secrets/process-init.py}
+    readinessHttpPort: 8000
+    readinessHttpPath: /healthcheck
+  - id: onlyoffice-front
+    artifact: onlyoffice
+    userId: 1000
+    memoryMiB: 2048
+    networks: [office-data, onlyoffice-web]
+    entrypoint: /usr/sbin/nginx
+    command: [-c, /run/secrets/office-nginx.conf, -g, 'daemon off;']
+    volumes:
+      - {volume: onlyoffice-office, target: /state}
+    files:
+      - {file: onlyoffice-office-nginx.conf, target: /run/secrets/office-nginx.conf}
+      - {file: onlyoffice-office-ca.pem, target: /run/secrets/office-ca.pem}
+      - {file: onlyoffice-office-web.pem, target: /run/secrets/office-web.pem}
+      - {file: onlyoffice-office-web-key.pem, target: /run/secrets/office-web-key.pem}
+    readinessHttpPort: 8080
+    readinessHttpPath: /healthcheck
+install:
+  processes: [onlyoffice-state-init, onlyoffice-docservice, onlyoffice-front]
+  dependencies:
+    onlyoffice-state-init: []
+    onlyoffice-docservice: [onlyoffice-state-init, seafile-files]
+    onlyoffice-front: [onlyoffice-docservice, caddy]
+restore:
+  processes: [onlyoffice-docservice, onlyoffice-front]
+  dependencies:
+    onlyoffice-docservice: [seafile-files]
+    onlyoffice-front: [onlyoffice-docservice, caddy]
+  processOverrides:
+    onlyoffice-docservice:
+      command: [-ec, 'test -d /state/cache/files; test ! -L /state/cache/files; cd /var/www/onlyoffice/documentserver/server/DocService; exec /usr/bin/python3 /run/secrets/process-init.py /var/www/onlyoffice/documentserver/server/DocService/docservice']

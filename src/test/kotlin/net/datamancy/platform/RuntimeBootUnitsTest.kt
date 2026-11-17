@@ -27,6 +27,13 @@ class RuntimeBootUnitsTest {
         assertFailsWith<IllegalArgumentException> { RuntimeBootUnits.render(spec(), hash, "$hash\nExecStart=/bad", 1000) }
         assertFailsWith<IllegalArgumentException> { RuntimeBootUnits.render(spec().copy(name = "bad%name"), hash, hash, 1000) }
     }
+    @Test fun `historical boot wrapper cannot accidentally enroll a Quadlet generation`() {
+        val fragment = FragmentAssemblyFixture.plan().specs.single()
+        assertFailsWith<IllegalArgumentException> {
+            RuntimeBootUnits.render(fragment, hash, "c".repeat(64), 1000)
+        }.also { assertContains(it.message.orEmpty(), "direct-Podman fallback refused") }
+    }
+
     @Test fun `bound inputs refuse content drift identity drift symlinks and path injection`() {
         val base = Files.createTempDirectory("boot-unit-", PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
         try {

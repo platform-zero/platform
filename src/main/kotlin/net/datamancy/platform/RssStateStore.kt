@@ -11,6 +11,7 @@ import java.nio.file.attribute.PosixFilePermission
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.UUID
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -26,11 +27,64 @@ import kotlinx.serialization.json.Json
 
 /** Durable v3-private RSS checkpoint/outbox. An ambiguous send is never automatically replayed. */
 class RssStateStore(private val root: Path) {
+    private var managedBase: Path = GenerationRuntime.BASE
+    private var operationScope = GenerationRssOperations(managedBase)
+    /** Internal-only scoped fixture; the public state-store constructor never exposes control authority. */
+    internal constructor(root: Path, managedBase: Path, operationScope: GenerationRssOperations) : this(root) {
+        this.managedBase = managedBase
+        this.operationScope = operationScope
+    }
     private val json = Json { ignoreUnknownKeys = false }
     private val state = root.resolve("rss-state.json")
     private val lockFile = root.resolve("rss-state.lock")
     private val previous = root.resolve("rss-state.previous")
     private val ownerOnly = setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)
+
+    /** Only the exact controller-owned generation state is privileged; arbitrary unit/qualification
+     * temp stores never acquire live controller locks. Direct staging cannot mutate an enrolled
+     * source: the enclosing schedule must own its lock. Controller callers acquire the global
+     * exclusion before generation locks; this nested scope only closes legacy direct writers. */
+    private fun <T> managedWrite(action: () -> T): T {
+        val generation = root.parent?.parent
+        if (generation == null || generation.parent != managedBase ||
+            !generation.fileName.toString().matches(Regex("q-[a-f0-9]{12}")) ||
+            root != generation.resolve("rss/state")) return action()
+        return operationScope.withExclusion {
+            val sealed = generation.resolve("bundle.json")
+            if (Files.exists(sealed, NOFOLLOW_LINKS)) {
+                val bundle = Json.decodeFromString<GenerationBundle>(ReleasePrivateFiles.read(sealed)
+                    .decodeToString(throwOnInvalidSequence = true))
+                require(bundle.request.id == generation.fileName.toString() && bundle.request.rssPlan != null &&
+                    bundle.request.recoveredRssPlan == null && bundle.recoverySourceArchiveSha256 == null &&
+                    bundle.recoverySourceKopia == null &&
+                    (bundle.ownedUpdate == null || RssControllerPayloads.authorized(
+                        bundle, generation.fileName.toString(), generation))) {
+                    "Recovered or unadopted managed RSS state is inert and cannot be written"
+                }
+            }
+            val schedule = generation.resolve("rss/schedule")
+            if (!RssSchedule.holdsSchedule(schedule)) {
+                operationScope.requireWritableGeneration(generation)
+                require(!Files.exists(schedule, NOFOLLOW_LINKS)) {
+                    "Managed enrolled RSS state may be changed only by its exact scheduler"
+                }
+            }
+            action()
+        }
+    }
+
+    /** Main's outer admission covers FETCH, credential use and state transition as one RSS
+     * controller operation, not merely the later transaction. Nested store writes reuse the
+     * same-thread global exclusion; an enrolled source still requires its scheduler lock. */
+    internal fun <T> withWriteAdmission(action: () -> T): T = managedWrite {
+        guardRoot()
+        if (Files.exists(state, NOFOLLOW_LINKS) || Files.exists(lockFile, NOFOLLOW_LINKS) ||
+            Files.exists(previous, NOFOLLOW_LINKS)) {
+            guardFile(lockFile)
+            load() // Validate the original checkpoint/uncertain outbox BEFORE network effects.
+        }
+        action()
+    }
 
     private fun guardRoot() {
         require(Files.isDirectory(root, NOFOLLOW_LINKS) && root.isAbsolute && root == root.normalize() &&
@@ -86,7 +140,7 @@ class RssStateStore(private val root: Path) {
         }
     }
     /** Only for a genuinely fresh, empty v3-owned state directory. Never reinitialize on reinstall. */
-    fun initializeFresh() {
+    fun initializeFresh() = managedWrite {
         guardRoot()
         require(!Files.exists(state, NOFOLLOW_LINKS) && !Files.exists(lockFile, NOFOLLOW_LINKS) &&
             !Files.exists(previous, NOFOLLOW_LINKS)) { "Existing RSS state or incomplete initialization; never reset" }
@@ -99,7 +153,7 @@ class RssStateStore(private val root: Path) {
         guardFile(lockFile)
         return load()
     }
-    private fun <T> transaction(block: (RssStoreDocument) -> Pair<RssStoreDocument, T>): T {
+    private fun <T> transaction(block: (RssStoreDocument) -> Pair<RssStoreDocument, T>): T = managedWrite {
         guardRoot()
         guardFile(lockFile)
         FileChannel.open(lockFile, StandardOpenOption.READ, StandardOpenOption.WRITE, NOFOLLOW_LINKS).use { channel ->
@@ -112,7 +166,7 @@ class RssStateStore(private val root: Path) {
                     atomicWrite(previous, previousBytes)
                     atomicWrite(state, bytes)
                 }
-                return result
+                result
             }
         }
     }

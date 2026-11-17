@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 2,
+  "id": "private-prometheus",
+  "revision": 2,
+  "product": "prometheus",
+  "artifacts": [
+    "prometheus"
+  ],
+  "providers": [
+    "alertmanager",
+    "node-exporter",
+    "loki",
+    "alloy"
+  ],
+  "networks": [
+    "metrics-private",
+    "prometheus-web"
+  ],
+  "providerNetworks": {
+    "alertmanager": [
+      "metrics-private"
+    ],
+    "node-exporter": [
+      "metrics-private"
+    ],
+    "loki": [
+      "metrics-private"
+    ],
+    "alloy": [
+      "metrics-private"
+    ]
+  },
+  "volumes": [
+    {
+      "id": "prometheus",
+      "userId": 65534
+    }
+  ],
+  "inputs": [
+    {
+      "name": "prometheus.yml",
+      "owner": "prometheus",
+      "purpose": "RUNTIME",
+      "consumers": [
+        "prometheus"
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "output": "prometheus.yml",
+      "resource": "prometheus.yml",
+      "format": "LITERAL",
+      "parameters": {}
+    }
+  ],
+  "processes": [
+    {
+      "id": "prometheus",
+      "artifact": "prometheus",
+      "userId": 65534,
+      "memoryMiB": 512,
+      "networks": [
+        "metrics-private",
+        "prometheus-web"
+      ],
+      "volumes": [
+        {
+          "volume": "prometheus",
+          "target": "/prometheus"
+        }
+      ],
+      "files": [
+        {
+          "file": "prometheus.yml",
+          "target": "/etc/prometheus/prometheus.yml"
+        }
+      ],
+      "command": [
+        "--config.file=/etc/prometheus/prometheus.yml",
+        "--storage.tsdb.path=/prometheus",
+        "--storage.tsdb.retention.time=7d",
+        "--web.listen-address=0.0.0.0:9090"
+      ],
+      "readinessHttpPort": 9090,
+      "readinessHttpPath": "/-/ready"
+    }
+  ],
+  "install": {
+    "processes": [
+      "prometheus"
+    ],
+    "dependencies": {
+      "prometheus": [
+        "alertmanager",
+        "node-exporter",
+        "loki",
+        "alloy"
+      ]
+    }
+  },
+  "restore": {
+    "processes": [
+      "prometheus"
+    ],
+    "dependencies": {
+      "prometheus": [
+        "alertmanager",
+        "node-exporter",
+        "loki",
+        "alloy"
+      ]
+    }
+  },
+  "webNetworks": [
+    "prometheus-web"
+  ]
+}

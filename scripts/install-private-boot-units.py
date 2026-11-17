@@ -69,13 +69,105 @@ def install_file(source, destination, content, mode):
     assert same_root_file(destination, content, mode)
 
 
+def stage_controller_only(receipts=Path('/mnt/media/p0-v3/image-acquisition-receipts'),
+                          supervision=SUPERVISION):
+    """Private development controller only; no service unit, enable or daemon-reload."""
+    digest, files, descriptor = distribution(DIST)
+    release = supervision / 'releases' / digest
+    assert receipts.is_dir() and receipts.stat().st_uid == os.getuid() and \
+        stat.S_IMODE(receipts.stat().st_mode) == 0o700
+    receipt = receipts / ('quadlet-controller-' + digest[:16])
+    assert not receipt.exists() and not receipt.is_symlink() and not release.exists() and not release.is_symlink(), \
+        'Controller distribution already attempted; reconcile, do not replay'
+    receipt.mkdir(mode=0o700)
+    with os.fdopen(os.open(receipt / 'stage.intent.json', os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600), 'wb') as output:
+        output.write(json.dumps({'schemaVersion': 1, 'controllerSha256': digest,
+            'files': {name: hashlib.sha256(data).hexdigest() for name, (_, data) in files.items()},
+            'scope': 'pinned-controller-only-no-units'}, sort_keys=True, separators=(',', ':')).encode())
+        output.flush(); os.fsync(output.fileno())
+    receipt_fd = os.open(receipt, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try: os.fsync(receipt_fd)
+    finally: os.close(receipt_fd)
+    root_directory(supervision)
+    root_directory(supervision / 'releases')
+    root_directory(release)
+    root_directory(release / 'bin')
+    root_directory(release / 'lib')
+    root_copy = '''import hashlib, os, pathlib, stat, sys
+source, target, expected, mode, tree = sys.argv[1:]
+root = pathlib.Path('/mnt/media/p0-v3/runtime-supervision/releases') / tree
+path = pathlib.Path(target)
+assert len(tree) == 64 and all(c in '0123456789abcdef' for c in tree)
+assert path.is_absolute() and path == pathlib.Path(os.path.normpath(path)) and path.is_relative_to(root)
+assert path.relative_to(root).as_posix() == 'controller.json' or (len(path.relative_to(root).parts) == 2 and path.relative_to(root).parts[0] in ('bin', 'lib'))
+assert mode in ('644', '755') and (mode == '755') == (path.relative_to(root).as_posix() == 'bin/p0-v3-platform')
+for parent in (root.parent.parent, root.parent, root, path.parent):
+    info = parent.lstat()
+    assert stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and stat.S_IMODE(info.st_mode) == 0o755
+assert not path.exists() and not path.is_symlink()
+src = pathlib.Path(source); info = src.lstat()
+assert stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid == int(os.environ['SUDO_UID']) and stat.S_IMODE(info.st_mode) == 0o600
+with src.open('rb') as inp:
+    data = inp.read(268435457)
+assert 0 < len(data) <= 268435456 and hashlib.sha256(data).hexdigest() == expected
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, int(mode, 8))
+with os.fdopen(fd, 'wb') as out:
+    os.fchmod(out.fileno(), int(mode, 8)); out.write(data); out.flush(); os.fsync(out.fileno())
+dirfd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try: os.fsync(dirfd)
+finally: os.close(dirfd)
+'''
+    with tempfile.TemporaryDirectory(prefix='quadlet-controller-', dir=receipt) as staging_path:
+        staging = Path(staging_path)
+        for name, (mode, data) in list(files.items()) + [('controller.json', (0o644, descriptor))]:
+            source = staging / name
+            source.parent.mkdir(exist_ok=True)
+            with os.fdopen(os.open(source, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), 'wb') as output:
+                output.write(data); output.flush(); os.fsync(output.fileno())
+            call(['sudo', '-n', '/usr/bin/python3', '-I', '-c', root_copy, str(source),
+                str(release / name), hashlib.sha256(data).hexdigest(), format(mode, 'o'), digest])
+            assert same_root_file(release / name, data, mode)
+    assert set(p.relative_to(release).as_posix() for p in release.rglob('*') if p.is_file()) == set(files) | {'controller.json'}
+    with os.fdopen(os.open(receipt / 'stage.result.json', os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600), 'wb') as output:
+        output.write(json.dumps({'schemaVersion': 1, 'controllerSha256': digest, 'staged': True,
+            'unitsInstalled': False, 'unitStarted': False}, sort_keys=True, separators=(',', ':')).encode())
+        output.flush(); os.fsync(output.fileno())
+    receipt_fd = os.open(receipt, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try: os.fsync(receipt_fd)
+    finally: os.close(receipt_fd)
+    print(json.dumps({'controllerTreeSha256': digest, 'unitsInstalled': False,
+        'unitStarted': False, 'fullQualification': False}))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--activate', action='store_true', help='Enable at boot and start ONLY the explicitly named units')
-    parser.add_argument('names', nargs='+')
+    parser.add_argument('--controller-only', action='store_true', help='Stage immutable pinned development controller without installing units')
+    parser.add_argument('--qualification-publish', type=Path, help='Root-owned original qualification publication request; no boot changes')
+    parser.add_argument('names', nargs='*')
     args = parser.parse_args()
     assert 1 <= os.getuid() <= 65534, 'Run as the private runtime owner, not root'
-    assert len(args.names) == len(set(args.names)) and all(SLUG.fullmatch(n) for n in args.names)
+    if args.controller_only:
+        assert not args.activate and not args.names and args.qualification_publish is None
+        stage_controller_only()
+        return
+    if args.qualification_publish is not None:
+        assert not args.activate and not args.names, 'Publication and boot enrollment are disjoint effects'
+        source = args.qualification_publish
+        assert source.is_absolute() and source == Path(os.path.normpath(source)) and \
+            source.parent == Path('/mnt/media/p0-v3/qualification-publication') and \
+            source.name == 'artifacts.request.json', 'Fixed original root request location required'
+        # The root-only directory is intentionally inaccessible to this non-root caller.
+        # The root-owned platform publisher independently verifies mode/owner/links/bytes.
+        digest, files, descriptor = distribution(DIST)
+        release = SUPERVISION / 'releases' / digest
+        assert same_root_file(release / 'controller.json', descriptor, 0o644)
+        for relative, (mode, data) in files.items():
+            assert same_root_file(release / relative, data, mode)
+        platform = release / 'bin/p0-v3-platform'
+        assert call(['sudo', '-n', str(platform), 'qualification', 'publish-artifacts', str(source)])
+        return
+    assert args.names and len(args.names) == len(set(args.names)) and all(SLUG.fullmatch(n) for n in args.names)
     assert BASE.resolve() == BASE and SYSTEMD.resolve() == SYSTEMD
     env = {**os.environ, 'JAVA_HOME': '/usr/lib/jvm/java-21-openjdk-amd64'}
     # Audit live resources before installing anything; do not adopt incomplete or stopped deployments.

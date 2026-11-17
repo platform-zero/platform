@@ -1,0 +1,36 @@
+schemaVersion: 2
+id: private-caddy
+revision: 1
+product: caddy
+artifacts: [caddy]
+networks: [ingress-control]
+volumes:
+  - {id: caddy-data, userId: 1000}
+  - {id: caddy-config, userId: 1000}
+inputs:
+  - {name: caddy.env, owner: caddy, purpose: RUNTIME, consumers: [caddy]}
+  - {name: caddy.json, owner: caddy, purpose: RUNTIME, consumers: [caddy]}
+processes:
+  - id: caddy
+    artifact: caddy
+    userId: 1000
+    memoryMiB: 256
+    networks: [ingress-control]
+    volumes:
+      - {volume: caddy-data, target: /data}
+      - {volume: caddy-config, target: /config}
+    entrypoint: /usr/bin/caddy
+    # Never replay previously autosaved ingress on fresh install or isolated restore.
+    command: [run, --config, /run/secrets/caddy.json]
+    environmentFile: caddy.env
+    files:
+      - {file: caddy.json, target: /run/secrets/caddy.json}
+    readiness: [/usr/bin/wget, -q, -O, /dev/null, 'http://127.0.0.1:2019/config/']
+install:
+  processes: [caddy]
+  dependencies:
+    caddy: []
+restore:
+  processes: [caddy]
+  dependencies:
+    caddy: []

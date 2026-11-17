@@ -56,6 +56,38 @@ class GenerationBackupScheduleTest {
         assertEquals(first.slot, GenerationBackupSchedule.slot(f.enrollment.bindingSha256, "2026-01-01"))
         assertFalse(Files.exists(f.root.resolve("failure.alert")))
     }
+    @Test fun `immutable completed pages preserve original evidence and never replay a stale slot`() = fixture { f ->
+        tick(f)
+        val firstDay = java.time.LocalDate.parse("2026-01-01")
+        val binding = f.enrollment.bindingSha256
+        for (offset in 1 until ScheduleHistory.PAGE_SIZE) {
+            val day = firstDay.plusDays(offset.toLong()).toString()
+            val root = Files.createDirectory(f.root.resolve("slots/$day"),
+                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+            val slot = GenerationBackupSchedule.slot(binding, day)
+            write(root.resolve("intent.json"), json.encodeToString(slot))
+            write(root.resolve("result.json"), json.encodeToString(BackupScheduleResult(slot,
+                result(q, hash, slot.capture))))
+        }
+        f.state.at = Instant.parse("2026-05-09T04:00:00Z")
+        assertEquals("completed", tick(f).status)
+        assertEquals(1, ScheduleHistory.inspect(f.root, binding, "daily").segments)
+        assertTrue(Files.exists(f.root.resolve("slots/2026-01-01/result.json")))
+        Files.writeString(f.root.resolve("slots/2026-01-01/result.json"), "tampered")
+        f.state.at = f.state.at.plusSeconds(86400)
+        assertFails { tick(f) }
+        assertEquals(2, f.state.callbacks)
+    }
+    @Test fun `partial history checkpoint blocks further effects and retains its intent`() = fixture { f ->
+        tick(f)
+        val history = Files.createDirectory(f.root.resolve("history"),
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+        write(history.resolve("segment-00000001.intent.json"), "unknown interrupted checkpoint")
+        f.state.at = f.state.at.plusSeconds(86400)
+        assertFails { tick(f) }
+        assertEquals(1, f.state.callbacks)
+        assertTrue(Files.exists(history.resolve("segment-00000001.intent.json")))
+    }
     @Test fun `enrollment is single use and pins full immutable inventory`() = fixture { f ->
         val bytes = Files.readAllBytes(f.root.resolve("inventory.json"))
         assertFails { f.engine.enroll(bytes, q, hash, hash, UnixSystem().uid.toInt()) }
@@ -74,6 +106,8 @@ class GenerationBackupScheduleTest {
         assertFailsWith<AssertionError> { tick(f) }
         val intent = f.root.resolve("slots/2026-01-01/intent.json"); val original = Files.readAllBytes(intent)
         assertFalse(Files.exists(intent.parent.resolve("result.json")))
+        assertFails { f.engine.reconcileMissingResult(q, f.enrollment.bindingSha256, "2026-01-01") }
+        assertFalse(Files.exists(intent.parent.resolve("missing-result-terminal.json")))
         f.state.fail = null; f.state.at = f.state.at.plusSeconds(864000)
         assertFails { tick(f) }; assertEquals(1, f.state.callbacks)
         assertTrue(Files.exists(f.root.resolve("failure.alert")))
@@ -91,6 +125,18 @@ class GenerationBackupScheduleTest {
             assertTrue(Files.exists(f.root.resolve("failure.alert")))
             f.state.at = f.state.at.plusSeconds(86400); assertFails { tick(f) }; assertEquals(1, f.state.callbacks)
         }
+    }
+    @Test fun `failed original schedule cannot invent a terminal source resume`() = fixture { f ->
+        f.state.fail = { error("lost original callback acknowledgement") }
+        assertFails { tick(f) }
+        val result = f.root.resolve("slots/2026-01-01/result.json")
+        val before = Files.readAllBytes(result)
+        assertFails { f.engine.reconcileNativeCompletion(q, f.enrollment.bindingSha256, "2026-01-01") }
+        assertContentEquals(before, Files.readAllBytes(result))
+        assertFalse(Files.exists(result.parent.resolve("terminal-readback.json")))
+        assertTrue(Files.exists(f.root.resolve("failure.alert")))
+        f.state.fail = null; f.state.at = f.state.at.plusSeconds(86400)
+        assertFails { tick(f) }; assertEquals(1, f.state.callbacks)
     }
     @Test fun `failure result persistence does not skip independent alert`() = fixture { f ->
         f.state.fail = { Files.createDirectory(f.root.resolve("slots/2026-01-01/result.json")); error("unit persistence failure") }

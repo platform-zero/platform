@@ -1,5 +1,8 @@
 package net.datamancy.platform
 
+import java.io.ByteArrayInputStream
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.Files
@@ -7,15 +10,28 @@ import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption.*
 import java.nio.file.attribute.PosixFilePermissions
+import java.security.cert.CertificateFactory
+import java.time.Instant
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.TrustManagerFactory
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 
-@Serializable data class RuntimeVolume(val id: String, val userId: Int)
+@Serializable data class RuntimeVolumeOwner(val userId: Int, val groupId: Int)
+@Serializable data class RuntimeVolume(val id: String, val userId: Int,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val mappedOwners: List<RuntimeVolumeOwner> = emptyList())
 @Serializable data class RuntimeMount(val volume: String, val target: String)
+/** Only fixed, generation-bound control endpoints may be mounted; Caddy mounts the
+ * private directory before the broker creates its socket, never an engine socket. */
+@Serializable data class RuntimeControlSocketMount(val source: String, val target: String)
 @Serializable data class RuntimeFile(val file: String, val target: String)
+@Serializable data class RuntimeNetworkAlias(val network: String, val host: String)
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable data class RuntimeProcess(val id: String, val image: String, val imageId: String,
     val userId: Int, val groupId: Int = userId, val dependencies: List<String> = emptyList(),
@@ -24,19 +40,32 @@ import kotlinx.serialization.json.*
     val tmpfs: List<String> = listOf("/tmp"), val readiness: List<String> = emptyList(), val oneShot: Boolean = false,
     val memoryMiB: Int = 512, val capabilities: List<String> = emptyList(), val apparmorProfile: String? = null,
     val readinessHttpPort: Int? = null, val readinessHttpPath: String = "/",
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val networks: List<String> = listOf("net"))
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val networks: List<String> = listOf("net"),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val networkAliases: List<RuntimeNetworkAlias> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val controlSocketMount: RuntimeControlSocketMount? = null,
+    /** Result-bound per-process host env created after a declared native issuer, never
+     * included in sealed preparation hashes. Unit admission rechecks its result. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val lateEnvironmentFile: String? = null)
 /** Logical network writer; provider storage ownership is not application schema ownership. */
 @Serializable data class RuntimeDatabaseAccess(val consumer: String, val provider: String, val volume: String,
     val database: String, val principal: String, val credentialFile: String, val network: String)
 /** Explicit owned public ingress, never generic arbitrary host-port publication. */
 @Serializable data class RuntimeIngressPublication(val site: String, val approvedHosts: Set<String>, val listenAddress: String)
+@Serializable enum class RuntimeExecutionBackend { DIRECT_PODMAN_V1, QUADLET_V2 }
+@Serializable data class RuntimeFragmentBinding(val recipe: String, val phase: String, val resources: Map<String, String>,
+    val controllerSha256: String? = null, val controllerUid: Int? = null, val controllerGid: Int? = null)
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable data class PrivateDeploymentSpec(val schemaVersion: Int = 1, val name: String,
     val volumes: List<RuntimeVolume>, val processes: List<RuntimeProcess>,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val networks: List<String> = listOf("net"),
     @EncodeDefault(EncodeDefault.Mode.NEVER) val databaseAccess: List<RuntimeDatabaseAccess> = emptyList(),
     @EncodeDefault(EncodeDefault.Mode.NEVER) val store: RuntimeStore = RuntimeStore.LEGACY,
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val ingress: RuntimeIngressPublication? = null)
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val ingress: RuntimeIngressPublication? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val nativeIngress: RuntimeNativeIngressPublication? = null,
+    /** Cold V2 custody only: retain original initializer state without mounting it into any daemon. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val unmountedRecoveryVolumes: Set<String> = emptySet(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val executionBackend: RuntimeExecutionBackend = RuntimeExecutionBackend.DIRECT_PODMAN_V1,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val fragmentBinding: RuntimeFragmentBinding? = null)
 @Serializable data class RuntimeStatus(val id: String, val state: String, val exitCode: Int?)
 @Serializable internal data class RuntimeAudit(val name: String, val fingerprint: String,
     val existingResources: Int, val maintenanceId: String?, val statuses: List<RuntimeStatus>)
@@ -59,9 +88,125 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
         private val json = Json { ignoreUnknownKeys = false }
         private val slug = Regex("[a-z][a-z0-9-]{0,39}")
         private val fileName = Regex("[a-z][a-z0-9.-]{0,79}")
-        private val absolute = Regex("/(?:[a-zA-Z0-9_-]+/)*[a-zA-Z0-9_.-]+")
+        private val absolute = Regex("/(?:[a-zA-Z0-9_-]+(?:\\.[a-zA-Z0-9_-]+)*/)*[a-zA-Z0-9_.-]+")
         private const val OWNER = "io.p0v3.private-deployment"
         private const val HASH = "io.p0v3.runtime-fingerprint"
+        private data class NativeLockIdentity(val inode: Long, val device: Long)
+        private val orderedNativeLocks = ThreadLocal.withInitial { mutableMapOf<Path, NativeLockIdentity>() }
+        private fun boundedNativeLock(channel: FileChannel, mustBeBound: Boolean): java.nio.channels.FileLock {
+            if (!mustBeBound && RecoveryDeadline.remainingSecondsIfBound() == null) return channel.lock()
+            var acquired: java.nio.channels.FileLock? = null
+            while (acquired == null) {
+                val left = RecoveryDeadline.remainingMillis()
+                if (Thread.currentThread().isInterrupted) throw InterruptedException("Native runtime lock interrupted")
+                acquired = try { channel.tryLock() }
+                    catch (_: java.nio.channels.OverlappingFileLockException) { null }
+                if (acquired == null) Thread.sleep(minOf(100L, left))
+            }
+            return requireNotNull(acquired)
+        }
+        private fun lockIdentity(path: Path): NativeLockIdentity {
+            require(path.isAbsolute && path.normalize() == path && path.toRealPath() == path &&
+                Files.isRegularFile(path, NOFOLLOW_LINKS) &&
+                Files.getPosixFilePermissions(path) == PosixFilePermissions.fromString("rw-------") &&
+                (Files.getAttribute(path, "unix:uid", NOFOLLOW_LINKS) as Number).toLong() ==
+                    com.sun.security.auth.module.UnixSystem().uid &&
+                (Files.getAttribute(path, "unix:nlink", NOFOLLOW_LINKS) as Number).toLong() == 1L) {
+                "Runtime member lock must be owned, regular and single-link"
+            }
+            return NativeLockIdentity((Files.getAttribute(path, "unix:ino", NOFOLLOW_LINKS) as Number).toLong(),
+                (Files.getAttribute(path, "unix:dev", NOFOLLOW_LINKS) as Number).toLong())
+        }
+        /** Parent namespace gate precedes root creation as well as native member locking.
+         * Without it a preparation can see an absent root, generate secrets, and populate
+         * the lock-only directory after no-target source resume. Gate files are permanent. */
+        private fun <T> withNamespaceGates(members: List<String>, runtimeRoot: Path,
+            mustBeBound: Boolean, action: () -> T): T {
+            fun acquire(index: Int): T {
+                if (index == members.size) return action()
+                val gate = runtimeRoot.resolve(".namespace-${members[index]}.lock")
+                val initial = if (Files.exists(gate, NOFOLLOW_LINKS)) lockIdentity(gate) else null
+                return JvmNativeLockGate.with(gate, JvmNativeLockGate.boundedAdmissionMillis(mustBeBound)) {
+                    FileChannel.open(gate, setOf(CREATE, WRITE, NOFOLLOW_LINKS),
+                        PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"))).use { channel ->
+                        val opened = lockIdentity(gate)
+                        require(initial == null || opened == initial) { "Native namespace gate changed during open" }
+                        boundedNativeLock(channel, mustBeBound = mustBeBound).use {
+                            require(lockIdentity(gate) == opened) { "Native namespace gate replaced while acquiring" }
+                            val result = acquire(index + 1)
+                            require(lockIdentity(gate) == opened) { "Native namespace gate replaced while held" }
+                            result
+                        }
+                    }
+                }
+            }
+            return acquire(0)
+        }
+        private fun <T> withMemberLock(name: String, runtimeRoot: Path,
+            mustBeBound: Boolean, action: () -> T): T {
+            val root = runtimeRoot.resolve(name)
+            if (!Files.exists(root, NOFOLLOW_LINKS)) {
+                Files.createDirectory(root, PosixFilePermissions.asFileAttribute(
+                    PosixFilePermissions.fromString("rwx------")))
+                FileChannel.open(runtimeRoot, READ).use { it.force(true) }
+            }
+            ReleasePrivateFiles.directory(root)
+            val lock = root.resolve("runtime.lock")
+            val initial = if (Files.exists(lock, NOFOLLOW_LINKS)) lockIdentity(lock) else null
+            return JvmNativeLockGate.with(lock, JvmNativeLockGate.boundedAdmissionMillis(mustBeBound)) {
+                FileChannel.open(lock, setOf(CREATE, WRITE, NOFOLLOW_LINKS),
+                    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"))).use { channel ->
+                    val opened = lockIdentity(lock)
+                    require(initial == null || opened == initial) { "Runtime member lock changed during open" }
+                    boundedNativeLock(channel, mustBeBound = mustBeBound).use {
+                        require(lockIdentity(lock) == opened) { "Runtime member lock replaced while acquiring" }
+                        val held = orderedNativeLocks.get()
+                        require(held.putIfAbsent(lock, opened) == null)
+                        try { action() }
+                        finally {
+                            val unchanged = runCatching { lockIdentity(lock) == opened }.getOrDefault(false)
+                            held.remove(lock)
+                            if (held.isEmpty()) orderedNativeLocks.remove()
+                            require(unchanged) { "Runtime member lock replaced while held; retain native isolation" }
+                        }
+                    }
+                }
+            }
+        }
+        /** Preparation holds the SAME namespace gate and member runtime.lock as a no-target
+         * census from before its first absent-root test through input and manifest fsync. */
+        fun <T> withPreparationNamespace(name: String, runtimeRoot: Path, action: (Boolean) -> T): T {
+            require(slug.matches(name) && orderedNativeLocks.get().isEmpty())
+            ReleasePrivateFiles.directory(runtimeRoot)
+            return withNamespaceGates(listOf(name), runtimeRoot, mustBeBound = false) {
+                val fresh = !Files.exists(runtimeRoot.resolve(name), NOFOLLOW_LINKS)
+                withMemberLock(name, runtimeRoot, mustBeBound = false) { action(fresh) }
+            }
+        }
+        /** Acquire source AND target namespace gates first, then all identical native member
+         * runtime.lock files in global name order. Existing operations reenter held locks. */
+        fun <T> withOrderedNativeLocks(members: Collection<String>, runtimeRoot: Path = BASE,
+            action: () -> T): T {
+            require(members.isNotEmpty() && members.size == members.toSet().size &&
+                members.all { it.matches(Regex("q-[a-f0-9]{12}-[a-z][a-z0-9-]{0,39}")) })
+            ReleasePrivateFiles.directory(runtimeRoot)
+            val held = orderedNativeLocks.get()
+            if (held.isNotEmpty()) {
+                // Only a strict subset of the SAME already-held native member paths may
+                // reenter; never acquire a later namespace gate/member out of order.
+                require(members.all { member ->
+                    val path = runtimeRoot.resolve(member).resolve("runtime.lock")
+                    held[path] != null && lockIdentity(path) == held[path]
+                }) { "Nested native cohort cannot extend ordered isolation locks" }
+                return action()
+            }
+            val sorted = members.sorted()
+            return withNamespaceGates(sorted, runtimeRoot, mustBeBound = true) {
+                fun acquire(index: Int): T = if (index == sorted.size) action()
+                    else withMemberLock(sorted[index], runtimeRoot, mustBeBound = true) { acquire(index + 1) }
+                acquire(0)
+            }
+        }
         private val healthClient = java.net.http.HttpClient.newBuilder().version(java.net.http.HttpClient.Version.HTTP_1_1)
             .connectTimeout(java.time.Duration.ofSeconds(3))
             .followRedirects(java.net.http.HttpClient.Redirect.NEVER).build()
@@ -75,6 +220,49 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
         }
         fun real(boundFingerprints: Map<String, String> = emptyMap(), backupAccess: RuntimeBackupAccess? = null) =
             PrivateDeployment(BASE, PrivateRootfulCommands(120), boundFingerprints = boundFingerprints, backupAccess = backupAccess)
+        /** Native read-only namespace census when an owned target has NO sealed bundle.
+         * Do not infer isolation from missing files, a Podman callback or a stale target name. */
+        fun observeAbsentOwnedTarget(source: GenerationBundle, sourceSha256: String, target: String,
+            commands: RuntimeCommands = PrivateRootfulCommands(120, RuntimeStore.CANONICAL_V2),
+            runtimeRoot: Path = BASE): NativeOwnedTargetAbsence {
+            require(source.request.store == RuntimeStore.CANONICAL_V2 &&
+                sourceSha256.matches(Regex("[a-f0-9]{64}")) &&
+                target.matches(Regex("q-[a-f0-9]{12}")) && source.request.id != target &&
+                source.members.isNotEmpty())
+            val names = source.members.map { pin ->
+                require(pin.spec.name.startsWith("${source.request.id}-"))
+                target + pin.spec.name.removePrefix(source.request.id)
+            }.sorted()
+            require(names.distinct().size == names.size)
+            val inventories = linkedMapOf<String, String>()
+            for ((kind, args) in listOf(
+                "container" to listOf("container", "ls", "--all", "--format", "{{.Names}}"),
+                "network" to listOf("network", "ls", "--format", "{{.Name}}"),
+                "volume" to listOf("volume", "ls", "--format", "{{.Name}}"),
+                "secret" to listOf("secret", "ls", "--format", "{{.Name}}"))) {
+                val result = commands.run(args)
+                require(result.exitCode == 0 && result.output.toByteArray().size <= 2_000_000) {
+                    "Native $kind namespace absence could not be audited"
+                }
+                require(result.output.lineSequence().map(String::trim).filter(String::isNotEmpty).all { value ->
+                    value.length <= 255 && names.none { member -> value.startsWith("p0v3-live-$member-") }
+                }) { "Native owned target $kind resource exists; no source resume" }
+                inventories[kind] = ReleaseLocks.sha256(result.output.toByteArray())
+            }
+            names.forEach { member ->
+                val dir = runtimeRoot.resolve(member)
+                if (Files.exists(dir, NOFOLLOW_LINKS)) {
+                    ReleasePrivateFiles.directory(dir)
+                    Files.list(dir).use { entries -> require(entries.allMatch { entry ->
+                        entry.fileName.toString() == "runtime.lock" && Files.isRegularFile(entry, NOFOLLOW_LINKS) &&
+                            Files.getPosixFilePermissions(entry) == PosixFilePermissions.fromString("rw-------")
+                    }) { "Native owned target runtime preparation exists; no source resume" } }
+                }
+            }
+            return NativeOwnedTargetAbsence(source = ReleaseGeneration(source.request.id, sourceSha256),
+                targetGeneration = target, targetMembers = names,
+                podmanInventorySha256 = inventories, runtimeMemberDirectoriesEmpty = true)
+        }
         fun inputNames(spec: PrivateDeploymentSpec): List<String> =
             (spec.processes.mapNotNull { it.environmentFile } + spec.processes.flatMap { p -> p.files.map { it.file } }).distinct().sorted()
         fun expectedFingerprint(spec: PrivateDeploymentSpec, inputHashes: Map<String, String>): String {
@@ -87,11 +275,32 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
         }
         fun read(path: Path): PrivateDeploymentSpec = json.decodeFromString(ReleaseLocks.privateBytes(path).decodeToString())
         fun validate(spec: PrivateDeploymentSpec): List<RuntimeProcess> {
-            require(spec.schemaVersion == 1 && slug.matches(spec.name) && spec.processes.size in 1..128 && spec.volumes.size <= 128)
+            if (spec.executionBackend == RuntimeExecutionBackend.DIRECT_PODMAN_V1) {
+                require(spec.fragmentBinding == null) { "YAML recipes cannot fall back to direct Podman" }
+            } else {
+                val binding = requireNotNull(spec.fragmentBinding) { "Quadlet requires a bound packaged recipe" }
+                require(spec.store == RuntimeStore.CANONICAL_V2 && binding.recipe.matches(Regex("[a-z][a-z0-9-]{0,23}")) &&
+                    binding.phase in setOf("INSTALL", "RESTORE") &&
+                    (binding.controllerSha256 == null || binding.controllerSha256.matches(Regex("[a-f0-9]{64}"))) &&
+                    (binding.controllerUid == null || binding.controllerUid in 1..65534) &&
+                    (binding.controllerGid == null || binding.controllerGid in 1..65534) &&
+                    binding.resources.isNotEmpty() &&
+                    binding.resources.size <= 256 && binding.resources.all { (path, hash) ->
+                        path.matches(Regex("[a-zA-Z0-9_./-]{1,240}")) && !path.startsWith('/') &&
+                            path.split('/').none { it in setOf("", ".", "..") } && hash.matches(Regex("[a-f0-9]{64}"))
+                    }) { "Invalid Quadlet fragment binding" }
+            }
+            require(spec.schemaVersion == 1 && slug.matches(spec.name) && spec.processes.size in 1..160 && spec.volumes.size <= 128)
             require(spec.processes.map { it.id }.distinct().size == spec.processes.size &&
                 spec.volumes.map { it.id }.distinct().size == spec.volumes.size) { "Duplicate runtime resource" }
             val volumes = spec.volumes.associateBy { it.id }
-            require(volumes.values.all { slug.matches(it.id) && it.userId in 1..65534 })
+            require(volumes.values.all { volume ->
+                slug.matches(volume.id) && volume.userId in 1..65534 && volume.mappedOwners.size <= 64 &&
+                    volume.mappedOwners.distinct() == volume.mappedOwners && volume.mappedOwners.all { owner ->
+                        owner.userId in 0..65534 && owner.groupId in 0..65534 &&
+                            owner != RuntimeVolumeOwner(volume.userId, volume.userId)
+                    }
+            }) { "Invalid or duplicate explicit volume owner mapping" }
             val byId = spec.processes.associateBy { it.id }
             spec.ingress?.let { ingress ->
                 val caddy = requireNotNull(byId["caddy"]) { "Only the Caddy daemon may publish ingress" }
@@ -105,12 +314,33 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
                     "Explicit exact-host canonical Caddy publication required"
                 }
             }
-            require(spec.networks.size in 1..32 && spec.networks.distinct() == spec.networks && spec.networks.all(slug::matches)) {
+            spec.nativeIngress?.let { native ->
+                val public = requireNotNull(spec.ingress) { "Fixed LiveKit TURN requires the approved owned Caddy site" }
+                val live = requireNotNull(byId[native.processId])
+                require(spec.store == RuntimeStore.CANONICAL_V2 && native.site == public.site &&
+                    native.approvedHost == "rtc.datamancy.net" && native.approvedHost in public.approvedHosts &&
+                    native.listenAddress == public.listenAddress && native.processId == "livekit" &&
+                    native.udpPort == 3478 && native.tlsPort == 5349 && !live.oneShot &&
+                    live.networks.contains("qualification-web") && "ingress-egress" !in live.networks &&
+                    spec.processes.single { it.id == "caddy" }.networks.contains("qualification-web")) {
+                    "Only fixed approved LiveKit TURN may request an explicit native ingress lease"
+                }
+            }
+            // A single 39-product generation owns more than 32 independently named
+            // private networks. Keep exact ownership/slug/uniqueness checks;
+            // bound the complete cohort rather than silently drop families.
+            require(spec.networks.size in 1..128 && spec.networks.distinct() == spec.networks && spec.networks.all(slug::matches)) {
                 "Distinct owned internal networks required"
             }
             for (p in spec.processes) {
                 require(p.networks.isNotEmpty() && p.networks.distinct() == p.networks && spec.networks.containsAll(p.networks)) {
                     "Process uses an undeclared or duplicate network"
+                }
+                require(p.networkAliases.size <= 64 && p.networkAliases.distinct() == p.networkAliases &&
+                    p.networkAliases.all { alias -> alias.network in p.networks &&
+                        AcmePreflight.hostPattern.matches(alias.host) && alias.host.length <= 253 &&
+                        alias.host.split('.').all { it.length <= 63 } }) {
+                    "Exact generation-local network alias required"
                 }
                 require(slug.matches(p.id) && p.userId in 1..65534 && p.groupId in 0..65534 && p.memoryMiB in 64..16384 &&
                     p.image.matches(Regex("[a-z0-9.-]+/[a-zA-Z0-9/_.-]+@sha256:[a-f0-9]{64}")) &&
@@ -118,6 +348,10 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
                 require(p.dependencies.distinct().size == p.dependencies.size && p.dependencies.all { it in byId && it != p.id })
                 require(p.apparmorProfile == null || p.apparmorProfile == "p0v3-private-v1") { "Unapproved AppArmor profile" }
                 require(p.environmentFile == null || (fileName.matches(p.environmentFile) && !p.environmentFile.startsWith("runtime.")))
+                require(p.lateEnvironmentFile == null || (p.id == "keeper" &&
+                    p.lateEnvironmentFile == "keeper-bao-late.env" && p.environmentFile == "keeper.env" &&
+                    p.dependencies.contains("bao") && p.memoryMiB == 512 &&
+                    spec.executionBackend == RuntimeExecutionBackend.QUADLET_V2))
                 require(p.entrypoint == null || absolute.matches(p.entrypoint))
                 require(p.command.size <= 128 && p.command.all { it.length <= 32768 && '\u0000' !in it })
                 require(p.oneShot || (p.readiness.isNotEmpty() xor (p.readinessHttpPort != null))) { "Exactly one daemon readiness probe required" }
@@ -125,14 +359,30 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
                 require(p.readinessHttpPath.matches(Regex("/[a-zA-Z0-9/_.-]*")) &&
                     p.readinessHttpPath.split('/').none { it == "." || it == ".." }) { "Unsafe readiness path" }
                 require(p.readiness.size <= 64 && p.readiness.all { it.isNotEmpty() && it.length <= 2048 && '\u0000' !in it })
+                require(p.controlSocketMount?.let { mount ->
+                    p.userId == 1000 && spec.store == RuntimeStore.CANONICAL_V2 &&
+                        spec.name.matches(Regex("q-[a-f0-9]{12}-[a-z][a-z0-9-]{0,23}")) &&
+                        spec.fragmentBinding?.recipe == CanonicalSharedYamlGraph.RECIPE &&
+                        (if (p.id == "caddy") mount.source == GenerationRuntime.BASE
+                            .resolve(spec.name.substring(0, 14)).resolve("managed/control/run").toString() &&
+                            mount.target == "/run/p0-control"
+                        else p.id == "hub-controller" && p.files.any { it.file == "jupyterhub-hub-settings.json" &&
+                            it.target == "/run/secrets/hub-settings.json" } &&
+                            mount.source == GenerationRuntime.BASE.resolve(spec.name.substring(0, 14))
+                                .resolve("notebooks/control.sock").toString() &&
+                            mount.target == "/run/p0-notebooks/control.sock")
+                } != false) { "Only exact generation-bound control sockets may be mounted" }
                 require(p.volumes.all { volumes[it.volume]?.userId == p.userId && absolute.matches(it.target) && it.target != "/" } &&
                     p.files.all { fileName.matches(it.file) && !it.file.startsWith("runtime.") && absolute.matches(it.target) } &&
                     p.tmpfs.all { absolute.matches(it) } && p.capabilities.distinct().size == p.capabilities.size &&
                     p.capabilities.all { it == "NET_BIND_SERVICE" && p.id == "caddy" }) { "Unsafe runtime mount or capability" }
-                val targets = p.volumes.map { it.target } + p.files.map { it.target } + p.tmpfs
+                val targets = p.volumes.map { it.target } + p.files.map { it.target } + p.tmpfs +
+                    listOfNotNull(p.controlSocketMount?.target)
                 require(targets.distinct().size == targets.size && targets.none { "/../" in it || it.endsWith("/..") || it.endsWith("/.") })
             }
             require(spec.networks.all { network -> spec.processes.any { network in it.networks } }) { "Orphan network" }
+            val aliases = spec.processes.flatMap { it.networkAliases }
+            require(aliases.distinct().size == aliases.size) { "Competing owners for one network-local host alias" }
             require(spec.databaseAccess.size <= 128 && spec.databaseAccess.map { it.consumer to it.database }.distinct().size == spec.databaseAccess.size) {
                 "Duplicate or excessive database access"
             }
@@ -145,7 +395,10 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
                     "Database access lacks owned storage, credential consumer or shared network"
                 }
             }
-            require(volumes.keys.all { id -> spec.processes.any { p -> p.volumes.any { it.volume == id } } }) { "Orphan volume" }
+            val mountedVolumes = spec.processes.flatMap { process -> process.volumes.map { it.volume } }.toSet()
+            require(volumes.keys - mountedVolumes == spec.unmountedRecoveryVolumes &&
+                (spec.unmountedRecoveryVolumes.isEmpty() || spec.store == RuntimeStore.CANONICAL_V2 &&
+                    spec.processes.none { it.oneShot })) { "Orphan volume or invalid cold-only custody" }
             val result = mutableListOf<RuntimeProcess>()
             val visiting = mutableSetOf<String>()
             val visited = mutableSetOf<String>()
@@ -199,6 +452,13 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
             fun capabilities(field: String): Set<String> = data.getValue(field).let {
                 if (it == JsonNull) emptySet() else it.jsonArray.map { value -> value.jsonPrimitive.content }.toSet()
             }
+            val actualNetworks = data.getValue("NetworkSettings").jsonObject.getValue("Networks").jsonObject
+            val aliasNetworks = process.networkAliases.map { it.network }.toSet()
+            require(aliasNetworks.all { network ->
+                val observed = actualNetworks[name(spec, network)]?.jsonObject?.get("Aliases")
+                observed is JsonArray && observed.map { it.jsonPrimitive.content }.filter { '.' in it }.toSet() ==
+                    process.networkAliases.filter { it.network == network }.map { it.host }.toSet()
+            }) { "Generation-local DNS alias drift: $resource" }
             require(data.getValue("Image").jsonPrimitive.content.removePrefix("sha256:") == process.imageId &&
                 config.getValue("User").jsonPrimitive.content == "${process.userId}:${process.groupId}" &&
                 !host.getValue("Privileged").jsonPrimitive.boolean && host.getValue("ReadonlyRootfs").jsonPrimitive.boolean &&
@@ -233,7 +493,15 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
     }
     private fun fingerprint(spec: PrivateDeploymentSpec, root: Path): String {
         val inputs = inputNames(spec)
-        Files.list(root).use { paths -> require(paths.allMatch { it.fileName.toString() in inputs + setOf("runtime.owner", "runtime.lock", "runtime.jobs", "runtime.import.intent", "runtime.import.complete", RuntimeMaintenance.FILE, RuntimeMaintenance.TEMP, RuntimeBackupLeases.FILE) }) { "Unexpected runtime directory entry" } }
+        val approved = inputs + setOf("runtime.owner", "runtime.lock", "runtime.jobs", "runtime.import.intent",
+            "runtime.import.complete", RuntimeMaintenance.FILE, RuntimeMaintenance.TEMP, RuntimeBackupLeases.FILE)
+        val turnOverlay = spec.store == RuntimeStore.CANONICAL_V2 &&
+            spec.processes.count { it.id == "livekit" && !it.oneShot } == 1
+        Files.list(root).use { paths -> require(paths.allMatch { entry ->
+            entry.fileName.toString() in approved || turnOverlay && entry.fileName.toString() == "turn-revisions" &&
+                Files.isDirectory(entry, NOFOLLOW_LINKS) && Files.getPosixFilePermissions(entry) ==
+                    PosixFilePermissions.fromString("rwx------")
+        }) { "Unexpected runtime directory entry" } }
         val hashes = inputs.associateWith { input ->
             val path = root.resolve(input)
             require(path.toRealPath() == path && Files.getAttribute(path, "unix:uid") == com.sun.security.auth.module.UnixSystem().uid.toInt())
@@ -278,6 +546,9 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
     }
     private fun <T> locked(spec: PrivateDeploymentSpec, observation: Boolean = false, allowMissingBackup: Boolean = false,
         action: PrivateDeployment.(Path, String, List<RuntimeProcess>) -> T): T {
+        require(spec.executionBackend == RuntimeExecutionBackend.DIRECT_PODMAN_V1) {
+            "Quadlet lifecycle admission is not installed; direct-Podman fallback refused"
+        }
         if (runtimeStore != spec.store) return PrivateDeployment(base,
             if (commands is PrivateRootfulCommands) commands.scoped(spec.store) else commands,
             httpReady, boundFingerprints, backupAccess, spec.store, ingressPortOwner, pause).locked(spec, observation, allowMissingBackup, action)
@@ -286,8 +557,7 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
         val root = base.resolve(spec.name)
         guardDirectory(root)
         val lock = root.resolve("runtime.lock")
-        return FileChannel.open(lock, setOf(CREATE, WRITE, NOFOLLOW_LINKS),
-            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"))).use { channel -> channel.lock().use {
+        val checked: () -> T = {
             require(Files.getPosixFilePermissions(lock) == PosixFilePermissions.fromString("rw-------"))
             val hash = fingerprint(spec, root)
             if (boundFingerprints.isNotEmpty()) require(boundFingerprints[spec.name] == hash) {
@@ -316,7 +586,26 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
                 }
             }
             action(root, hash, ordered)
-        } }
+        }
+        val held = orderedNativeLocks.get()
+        require(held.isEmpty() || lock in held) {
+            "Unordered native member lock cannot join an existing source/target isolation cohort"
+        }
+        return if (lock in held) {
+            val identity = held.getValue(lock)
+            require(lockIdentity(lock) == identity) { "Reentered member lock identity changed" }
+            checked().also { require(lockIdentity(lock) == identity) { "Reentered member lock replaced during native effect" } }
+        }
+        else JvmNativeLockGate.with(lock) {
+            FileChannel.open(lock, setOf(CREATE, WRITE, NOFOLLOW_LINKS),
+                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"))).use { channel ->
+                val original = lockIdentity(lock)
+                boundedNativeLock(channel, mustBeBound = false).use {
+                    require(lockIdentity(lock) == original) { "Native member lock replaced during admission" }
+                    checked().also { require(lockIdentity(lock) == original) { "Native member lock replaced during effect" } }
+                }
+            }
+        }
     }
     /** Every namespaced admin request is bound to a freshly audited live container and held runtime lock. */
     fun <T> withCaddyAdmin(spec: PrivateDeploymentSpec, expectedFingerprint: String, mutation: Boolean,
@@ -379,6 +668,186 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
         RuntimeAudit(spec.name, hash, resources, fence?.id, statuses(spec, jobs.completed))
     }
 
+    /** One fixed native LiveKit TLS-adoption actor. This does not publish :5349; A15's
+     * independent WebPKI handshake and A13's functional packet-return remain separate.
+     * Immutable secret revisions and a one-use intent precede stopping the one old SFU.
+     * A lost native acknowledgement leaves isolation and never triggers auto-restart. */
+    fun adoptEffectiveTurn(bundle: GenerationBundle, pin: GenerationPin, operation: String,
+        inputs: Map<String, String>): PublicTurnNativeObservation = locked(pin.spec) { root, fingerprint, _ ->
+        require(base == BASE && pin.spec.store == RuntimeStore.CANONICAL_V2 &&
+            pin.member.name == pin.spec.name && pin.runtimeFingerprint == fingerprint &&
+            pin in bundle.members && bundle.request.id.matches(Regex("q-[a-f0-9]{12}")) &&
+            operation.matches(Regex("[a-z0-9-]{1,64}")) &&
+            inputs.keys == setOf("rtc-turn.pem", "rtc-turn-key.pem", "livekit.yaml"))
+        RecoveryDeadline.remainingMillis() // No standalone native revision without inherited bounded controller lock.
+        val proc = pin.spec.processes.single { it.id == "livekit" && !it.oneShot }
+        require(proc.command == listOf("--config", "/run/secrets/livekit.yaml") &&
+            setOf("livekit.yaml", "livekit-turn-template.yaml", "rtc-turn.pem", "rtc-turn-key.pem")
+                .all { file -> proc.files.any { it.file == file } } &&
+            proc.entrypoint == "/livekit-server")
+        val generationRoot = GenerationRuntime.BASE.resolve(bundle.request.id)
+        val public = requireNotNull(NativeCredentialRevision.readHead(generationRoot))
+        val binding = public.revisions.getValue("rtc.datamancy.net")
+        val recordBytes = ReleasePrivateFiles.read(Path.of(binding.path), 65536)
+        require(ReleaseLocks.sha256(recordBytes) == binding.sha256)
+        val certificate = Json { ignoreUnknownKeys = false }.decodeFromString<PublicCertificateRevision>(
+            recordBytes.decodeToString(throwOnInvalidSequence = true))
+        val revision = certificate.revisionId
+        require(revision.matches(Regex("cert-[a-f0-9]{24}")) && certificate.generation == bundle.request.id &&
+            certificate.bundleSha256 == ReleaseLocks.sha256(ReleasePrivateFiles.read(generationRoot.resolve("bundle.json"))) &&
+            certificate.host == "rtc.datamancy.net" &&
+            ReleaseLocks.sha256(inputs.getValue("rtc-turn.pem").toByteArray()) == certificate.chainPemSha256 &&
+            ReleaseLocks.sha256(inputs.getValue("rtc-turn-key.pem").toByteArray()) == certificate.privateKeyPemSha256)
+        val bootstrap = ReleasePrivateFiles.read(root.resolve("livekit.yaml"), 1048576)
+        val template = ReleasePrivateFiles.read(root.resolve("livekit-turn-template.yaml"), 1048576)
+        require(pin.inputHashes["livekit.yaml"] == ReleaseLocks.sha256(bootstrap) &&
+            pin.inputHashes["livekit-turn-template.yaml"] == ReleaseLocks.sha256(template) &&
+            inputs.getValue("livekit.yaml") == LiveKitRuntime.effectivePublicTurnConfig(bundle.request.id,
+                certificate, bootstrap.decodeToString(throwOnInvalidSequence = true),
+                template.decodeToString(throwOnInvalidSequence = true)))
+        val turnRoot = root.resolve("turn-revisions")
+        val operations = turnRoot.resolve("operations")
+        val revisionRoot = turnRoot.resolve(revision)
+        val parentIntent = generationRoot.resolve("credential-revisions/public/turn/$operation.intent.json")
+        require(!Files.exists(revisionRoot, NOFOLLOW_LINKS) &&
+            !Files.exists(operations.resolve("$operation.intent.json"), NOFOLLOW_LINKS) &&
+            !Files.exists(operations.resolve("$operation.result.json"), NOFOLLOW_LINKS) &&
+            Files.exists(parentIntent, NOFOLLOW_LINKS) &&
+            !Files.exists(generationRoot.resolve("credential-revisions/public/turn/$operation.result.json"), NOFOLLOW_LINKS))
+        val admitted = Json { ignoreUnknownKeys = false }.decodeFromString<PublicTurnAdoptionIntent>(
+            ReleasePrivateFiles.read(parentIntent, 65536).decodeToString(throwOnInvalidSequence = true))
+        require(admitted.generation == bundle.request.id && admitted.bundleSha256 == certificate.bundleSha256 &&
+            admitted.operationId == operation && admitted.publicRevisionSha256 == binding.sha256 &&
+            admitted.leafDerSha256 == certificate.leafDerSha256 &&
+            admitted.chainPemSha256 == certificate.chainPemSha256 &&
+            admitted.privateKeyPemSha256 == certificate.privateKeyPemSha256 &&
+            admitted.effectiveConfigSha256 == ReleaseLocks.sha256(inputs.getValue("livekit.yaml").toByteArray()) &&
+            admitted.livekitFingerprint == fingerprint)
+        // Earlier native attempts must have BOTH the native result and independent
+        // A15 result before an unrelated new revision may replace the live process.
+        if (Files.exists(operations, NOFOLLOW_LINKS)) {
+            ReleasePrivateFiles.directory(operations)
+            Files.list(operations).use { paths -> paths.forEach { entry ->
+                val name = entry.fileName.toString()
+                require(name.matches(Regex("[a-z0-9-]{1,64}\\.(intent|result)\\.json")) &&
+                    Files.exists(operations.resolve(name.substringBefore('.') + ".intent.json"), NOFOLLOW_LINKS) &&
+                    Files.exists(operations.resolve(name.substringBefore('.') + ".result.json"), NOFOLLOW_LINKS) &&
+                    Files.exists(generationRoot.resolve("credential-revisions/public/turn/" +
+                        name.substringBefore('.') + ".result.json"), NOFOLLOW_LINKS)) {
+                    "Prior effective TURN native write remains uncertain"
+                }
+            } }
+        }
+        val container = name(pin.spec, "livekit")
+        val prior = requireNotNull(owned(pin.spec, "container", "livekit", fingerprint))
+        require(prior.getValue("State").jsonObject.getValue("Running").jsonPrimitive.boolean &&
+            RuntimeMaintenance.read(root, fingerprint) == null)
+        val intentBytes = Json.encodeToString(mapOf("operation" to operation,
+            "generation" to bundle.request.id, "bundleSha256" to certificate.bundleSha256,
+            "revision" to revision, "recordSha256" to binding.sha256,
+            "runtimeFingerprint" to fingerprint,
+            "chainSha256" to certificate.chainPemSha256, "keySha256" to certificate.privateKeyPemSha256,
+            "configSha256" to ReleaseLocks.sha256(inputs.getValue("livekit.yaml").toByteArray()))).toByteArray()
+        for (path in listOf(turnRoot, operations, revisionRoot)) {
+            if (!Files.exists(path, NOFOLLOW_LINKS)) {
+                Files.createDirectory(path, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+                FileChannel.open(path.parent, READ).use { it.force(true) }
+            }
+            ReleasePrivateFiles.directory(path)
+        }
+        ReleasePrivateFiles.save(operations.resolve("$operation.intent.json"), intentBytes)
+        val files = listOf("rtc-turn.pem", "rtc-turn-key.pem", "livekit.yaml")
+        files.forEach { file -> ReleasePrivateFiles.save(revisionRoot.resolve(file),
+            inputs.getValue(file).toByteArray()) }
+        val resourceLabels = listOf("--label=$OWNER=${pin.spec.name}", "--label=$HASH=$fingerprint",
+            "--label=io.p0v3.effective-turn=$revision")
+        files.forEach { file ->
+            val secret = name(pin.spec, "turn-$revision-$file")
+            require(!exists("secret", secret)) { "An uncertain effective TURN secret already exists" }
+            call(*(listOf("secret", "create") + resourceLabels + listOf(secret, revisionRoot.resolve(file).toString())).toTypedArray())
+            val observed = requireNotNull(owned(pin.spec, "secret", "turn-$revision-$file", fingerprint))
+            require(labels("secret", observed)["io.p0v3.effective-turn"]?.jsonPrimitive?.content == revision)
+        }
+        // Only after every revision input is independently pinned may the old SFU stop.
+        // Never force-remove a running process or fabricate success from a command return.
+        call("stop", "--time=30", container)
+        val stopped = requireNotNull(owned(pin.spec, "container", "livekit", fingerprint))
+        require(!stopped.getValue("State").jsonObject.getValue("Running").jsonPrimitive.boolean)
+        call("rm", container)
+        require(!exists("container", container))
+        val command = listOf("--config", "/run/turn-revisions/$revision/livekit.yaml")
+        val args = mutableListOf("create", "--name=$container", "--pull=never", *proc.networks.map { network ->
+            "--network=${name(pin.spec, network)}" + proc.networkAliases.filter { it.network == network }
+                .joinToString(separator = ",", prefix = if (proc.networkAliases.any { it.network == network }) ":" else "") { "alias=${it.host}" }
+        }.toTypedArray(), "--network-alias=livekit", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges",
+            "--user=${proc.userId}:${proc.groupId}", "--memory=${proc.memoryMiB}m", "--pids-limit=512", "--stop-timeout=30",
+            "--image-volume=ignore")
+        args += resourceLabels
+        proc.apparmorProfile?.let { args += "--security-opt=apparmor=$it" }
+        proc.capabilities.forEach { args += "--cap-add=$it" }
+        proc.tmpfs.forEach { args += "--tmpfs=$it:rw,nosuid,nodev,mode=1777,size=128m" }
+        proc.volumes.forEach { args += "--volume=${name(pin.spec, "volume-${it.volume}")}:${it.target}:U" }
+        proc.files.forEach { args += "--secret=${name(pin.spec, "file-${it.file}")},type=mount,target=${it.target},uid=${proc.userId},gid=${proc.groupId},mode=0400" }
+        files.forEach { file -> args += "--secret=${name(pin.spec, "turn-$revision-$file")},type=mount,target=/run/turn-revisions/$revision/$file,uid=${proc.userId},gid=${proc.groupId},mode=0400" }
+        proc.environmentFile?.let { args += "--env-file=${root.resolve(it)}" }
+        proc.lateEnvironmentFile?.let { args += "--env-file=${root.resolve(it)}" }
+        args += "--entrypoint=${requireNotNull(proc.entrypoint)}"
+        args += proc.image
+        args += command
+        call(*args.toTypedArray())
+        call("start", container)
+        val current = requireNotNull(owned(pin.spec, "container", "livekit", fingerprint))
+        val state = current.getValue("State").jsonObject
+        val id = current.getValue("Id").jsonPrimitive.content.removePrefix("sha256:")
+        require(state.getValue("Running").jsonPrimitive.boolean && id.matches(Regex("[a-f0-9]{64}")) &&
+            labels("container", current)["io.p0v3.effective-turn"]?.jsonPrimitive?.content == revision &&
+            current.getValue("Config").jsonObject.getValue("Cmd").jsonArray.map { it.jsonPrimitive.content } == command)
+        val installed = files.associateWith { file ->
+            val output = call("exec", "--user=${proc.userId}:${proc.groupId}", container, "sha256sum",
+                "/run/turn-revisions/$revision/$file")
+            val sha = output.substringBefore(' ')
+            require(sha.matches(Regex("[a-f0-9]{64}")) &&
+                sha == ReleaseLocks.sha256(inputs.getValue(file).toByteArray())) {
+                "LiveKit effective secret was not mounted with its original bytes"
+            }
+            sha
+        }
+        val address = NamespaceCaddyTransport.ownedProcessAddress(pin.spec, fingerprint, "livekit", "rtc-turn")
+        val factory = CertificateFactory.getInstance("X.509")
+        val chain = factory.generateCertificates(ByteArrayInputStream(inputs.getValue("rtc-turn.pem").toByteArray()))
+        val keys = java.security.KeyStore.getInstance("PKCS12").apply { load(null, null) }
+        chain.forEachIndexed { index, value -> keys.setCertificateEntry("public-$index", value) }
+        val managers = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(keys) }
+        val tls = SSLContext.getInstance("TLS").apply { init(null, managers.trustManagers, null) }
+        val tlsDeadline = System.nanoTime() + java.time.Duration.ofSeconds(90).toNanos()
+        var observedLeaf: ByteArray? = null
+        while (observedLeaf == null) {
+            RecoveryDeadline.remainingMillis()
+            val socket = Socket()
+            try {
+                socket.connect(InetSocketAddress(address, 5349), 2500)
+                observedLeaf = (tls.socketFactory.createSocket(socket, "rtc.datamancy.net", 5349, true) as SSLSocket).use {
+                    it.soTimeout = 2500
+                    it.sslParameters = it.sslParameters.apply {
+                        serverNames = listOf(javax.net.ssl.SNIHostName("rtc.datamancy.net"))
+                        endpointIdentificationAlgorithm = "HTTPS"
+                    }
+                    it.startHandshake()
+                    it.session.peerCertificates.first().encoded
+                }
+            } catch (failure: java.io.IOException) {
+                if (System.nanoTime() >= tlsDeadline) throw failure
+                Thread.sleep(500) // Read-only readiness observation, never a second native START.
+            } finally { socket.close() }
+        }
+        val proof = PublicTurnNativeObservation(bundle.request.id, certificate.bundleSha256,
+            operation, id, fingerprint, installed.getValue("rtc-turn.pem"),
+            installed.getValue("rtc-turn-key.pem"), installed.getValue("livekit.yaml"), command,
+            ReleaseLocks.sha256(requireNotNull(observedLeaf)), Instant.now().epochSecond)
+        require(proof.tlsObservedLeafDerSha256 == certificate.leafDerSha256)
+        ReleasePrivateFiles.save(operations.resolve("$operation.result.json"), Json.encodeToString(proof).toByteArray())
+        proof
+    }
     /** Allocate audited, empty staging resources without creating or starting any process. */
     fun provision(spec: PrivateDeploymentSpec): List<RuntimeStatus> = locked(spec) { root, hash, ordered ->
         require(RuntimeMaintenance.read(root, hash) == null) { "Maintenance fence blocks provisioning" }
@@ -419,15 +888,19 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
     }
     /** Fresh, initializer-free targets only. Import never starts a process and retains its fence on every failure. */
     fun importCold(spec: PrivateDeploymentSpec, archives: Map<String, Path>, sourceArchiveSha256: String, verificationRoot: Path, expectedHashes: Map<String, String>,
-        restoreRoot: (PrivateDeploymentSpec, RuntimeVolume, VolumeTarEntry) -> Unit = ColdVolumeImport::restoreRoot,
-        export: (PrivateDeploymentSpec, RuntimeVolume, Path) -> Unit = ColdVolumeExport::export): MaintenanceFence = locked(spec) { root, hash, ordered ->
+        restoreMetadata: (PrivateDeploymentSpec, RuntimeVolume, List<VolumeTarEntry>) -> Unit = ColdVolumeImport::restoreTree,
+        export: (PrivateDeploymentSpec, RuntimeVolume, Path) -> Unit = { member, volume, output ->
+            ColdVolumeExport.export(member, volume, output, maximumBytes = minOf(RecoveryCapsule.MAX_TOTAL,
+                Math.addExact(Files.size(archives.getValue(volume.id)), VolumeTar.MAX_METADATA_PREFIX)))
+        }): MaintenanceFence = locked(spec) { root, hash, ordered ->
         require(spec.ingress == null && spec.name.matches(Regex("q-[a-f0-9]{12}-[a-z][a-z0-9-]{0,23}")) && ordered.none { it.oneShot } &&
             sourceArchiveSha256.matches(Regex("[a-f0-9]{64}")) && archives.keys == spec.volumes.map { it.id }.toSet() &&
             expectedHashes.keys == archives.keys && expectedHashes.values.all { it.matches(Regex("[a-f0-9]{64}")) }) { "Fresh retired-initializer restore definition required" }
         guardDirectory(verificationRoot)
         requirePristine(spec, root, hash, ordered)
         require(!Files.exists(root.resolve("runtime.import.intent"), NOFOLLOW_LINKS) && !Files.exists(root.resolve("runtime.import.complete"), NOFOLLOW_LINKS))
-        val trees = spec.volumes.associate { it.id to VolumeTar.inspect(archives.getValue(it.id), it.userId) }
+        val trees = spec.volumes.associate { volume -> volume.id to VolumeTar.inspect(archives.getValue(volume.id),
+            volume.userId, volume.mappedOwners.map { it.userId to it.groupId }.toSet()) }
         val hashes = archives.mapValues { RecoveryCapsule.fileHash(it.value) }
         require(hashes == expectedHashes) { "Import payload differs from authenticated capsule declaration" }
         val marker = "p0v3-native-volume-import-v1\n$hash\n$sourceArchiveSha256\n"
@@ -446,11 +919,14 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
             RecoveryCapsule.guard(archive, RecoveryCapsule.MAX_TOTAL)
             require(RecoveryCapsule.fileHash(archive) == hashes.getValue(volume.id)) { "Import archive changed after preflight" }
             call("volume", "import", name(spec, "volume-${volume.id}"), archive.toString())
-            restoreRoot(spec, volume, trees.getValue(volume.id).single { it.path == "." })
+            restoreMetadata(spec, volume, trees.getValue(volume.id))
             val observed = verificationRoot.resolve("${volume.id}.tar")
             export(spec, volume, observed)
-            require(VolumeTar.inspect(observed, volume.userId) == trees.getValue(volume.id) &&
-                RecoveryCapsule.fileHash(archive) == hashes.getValue(volume.id)) { "Imported state differs from authenticated source" }
+            ColdVolumeImport.verifyImported(archive, observed, volume.userId,
+                volume.mappedOwners.map { it.userId to it.groupId }.toSet())
+            require(RecoveryCapsule.fileHash(archive) == hashes.getValue(volume.id)) {
+                "Imported source archive changed during native readback"
+            }
         }
         mark("runtime.import.complete")
         fence
@@ -500,16 +976,66 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
         }
     }
 
+    /** Only the imported Planka database is allowed to run under the retained restore fence;
+     * the application/other providers remain absent until native role-retired migration proof. */
+    fun startImportedMigrationDatabase(spec: PrivateDeploymentSpec, expectedFence: String): List<RuntimeStatus> =
+        locked(spec) { root, hash, all ->
+            require(spec.ingress == null && all.none { it.oneShot } &&
+                all.single { it.id == "planka" }.environmentFile == "planka.env")
+            requireImportComplete(root, hash)
+            val fence = requireNotNull(RuntimeMaintenance.read(root, hash))
+            require(fence.reason == "restore" && fence.stageTarget == null && fence.id == expectedFence &&
+                Files.exists(root.resolve("runtime.import.complete"), NOFOLLOW_LINKS))
+            val jobs = readJobs(spec, root, hash)
+            require(jobs.started.isEmpty() && jobs.completed.isEmpty() &&
+                all.all { owned(spec, "container", it.id, hash) == null }) { "Migration database start already attempted" }
+            val resources = spec.networks.size + spec.volumes.size + all.flatMap { it.files }.map { it.file }.distinct().size
+            require(resourceCount(spec, hash, all) == resources)
+            applyLocked(spec, "postgres", false, root, hash, all, ownedMigration = true)
+        }
+
+    /** Completes the same imported cohort, without restarting or reimporting the database.
+     * The caller has already checked the immutable Knex migration and native NOLOGIN readback. */
+    fun startImportedOwned(spec: PrivateDeploymentSpec, expectedFence: String): List<RuntimeStatus> =
+        locked(spec) { root, hash, all ->
+            require(spec.ingress == null && all.none { it.oneShot })
+            requireImportComplete(root, hash)
+            val fence = requireNotNull(RuntimeMaintenance.read(root, hash))
+            require(fence.reason == "restore" && fence.stageTarget == null && fence.id == expectedFence &&
+                all.single { it.id == "postgres" }.id == "postgres" && all.any { it.id == "planka" })
+            val db = owned(spec, "container", "postgres", hash)?.getValue("State")?.jsonObject
+            require(db?.getValue("Running")?.jsonPrimitive?.boolean == true &&
+                all.filter { it.id != "postgres" }.all { owned(spec, "container", it.id, hash) == null }) {
+                "Only the isolated migration database may precede Planka owned startup"
+            }
+            try {
+                RuntimeMaintenance.remove(root, hash, expectedFence)
+                applyLocked(spec, null, false, root, hash, all)
+            } catch (error: Exception) {
+                val interrupted = Thread.interrupted() || error is InterruptedException
+                try {
+                    try { RuntimeMaintenance.create(root, hash, "restore", null) }
+                    catch (failure: Exception) { error.addSuppressed(failure) }
+                    try { stopProcesses(spec, all) }
+                    catch (failure: Exception) { error.addSuppressed(failure) }
+                } finally { if (interrupted || error.suppressed.any { it is InterruptedException }) Thread.currentThread().interrupt() }
+                throw error
+            }
+        }
+
     private fun applySelected(spec: PrivateDeploymentSpec, target: String?, pristine: Boolean = false): List<RuntimeStatus> = locked(spec) { root, hash, all ->
         applyLocked(spec, target, pristine, root, hash, all)
     }
     private fun applyLocked(spec: PrivateDeploymentSpec, target: String?, pristine: Boolean,
-        root: Path, hash: String, all: List<RuntimeProcess>): List<RuntimeStatus> {
+        root: Path, hash: String, all: List<RuntimeProcess>, ownedMigration: Boolean = false): List<RuntimeStatus> {
         requireImportComplete(root, hash)
         // Close the gap between a group preflight and this member's first allocation.
         if (pristine) requirePristine(spec, root, hash, all)
         val fence = RuntimeMaintenance.read(root, hash)
-        require(fence == null || (target != null && target == fence.stageTarget)) { "Maintenance fence blocks startup" }
+        require(fence == null || (target != null && target == fence.stageTarget) ||
+            (ownedMigration && target == "postgres" && fence?.reason == "restore" && fence.stageTarget == null)) {
+            "Maintenance fence blocks startup"
+        }
         val selected = mutableSetOf<String>()
         fun include(id: String) {
             if (selected.add(id)) all.single { it.id == id }.dependencies.forEach(::include)
@@ -536,6 +1062,28 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
         ordered.forEach { p ->
             val container = name(spec, p.id)
             val present = exists("container", container)
+            if (p.id == "livekit" && spec.store == RuntimeStore.CANONICAL_V2 &&
+                Files.exists(root.resolve("turn-revisions"), NOFOLLOW_LINKS)) {
+                // Never silently rebuild an effective public TURN process from sealed
+                // disabled-bootstrap argv after an uncertain native revision write.
+                require(present && Files.exists(root.resolve("turn-revisions/operations"), NOFOLLOW_LINKS)) {
+                    "Effective TURN container lost; explicit native reconciliation required"
+                }
+                val sourceGeneration = spec.name.take(14)
+                require(sourceGeneration.matches(Regex("q-[a-f0-9]{12}")))
+                Files.list(root.resolve("turn-revisions/operations")).use { entries -> entries.forEach { entry ->
+                    val match = Regex("([a-z0-9-]{1,64})\\.(intent|result)\\.json")
+                        .matchEntire(entry.fileName.toString())
+                    requireNotNull(match)
+                    val attempt = match.groupValues[1]
+                    require(Files.exists(root.resolve("turn-revisions/operations/$attempt.intent.json"), NOFOLLOW_LINKS) &&
+                        Files.exists(root.resolve("turn-revisions/operations/$attempt.result.json"), NOFOLLOW_LINKS) &&
+                        Files.exists(GenerationRuntime.BASE.resolve(sourceGeneration).resolve(
+                            "credential-revisions/public/turn/$attempt.result.json"), NOFOLLOW_LINKS)) {
+                        "Effective TURN attempt still lacks exact independent native receipt"
+                    }
+                } }
+            }
             if (p.oneShot && p.id in jobs.completed) {
                 if (present) {
                     val state = inspect("container", container).getValue("State").jsonObject
@@ -547,7 +1095,10 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
             }
             require(!p.oneShot || p.id !in jobs.started || present) { "Missing in-flight initialization; manual reconciliation required: ${p.id}" }
             if (!present) {
-                val args = mutableListOf("create", "--name=$container", "--pull=never", *p.networks.map { "--network=${name(spec, it)}" }.toTypedArray(),
+                val args = mutableListOf("create", "--name=$container", "--pull=never", *p.networks.map { network ->
+                    "--network=${name(spec, network)}" + p.networkAliases.filter { it.network == network }
+                        .joinToString(separator = ",", prefix = if (p.networkAliases.any { it.network == network }) ":" else "") { "alias=${it.host}" }
+                }.toTypedArray(),
                     "--network-alias=${p.id}", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges",
                     "--user=${p.userId}:${p.groupId}", "--memory=${p.memoryMiB}m", "--pids-limit=512", "--stop-timeout=30", "--image-volume=ignore")
                 args += labels
@@ -560,6 +1111,7 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
                 p.volumes.forEach { args += "--volume=${name(spec, "volume-${it.volume}")}:${it.target}:U" }
                 p.files.forEach { args += "--secret=${name(spec, "file-${it.file}")},type=mount,target=${it.target},uid=${p.userId},gid=${p.groupId},mode=0400" }
                 p.environmentFile?.let { args += "--env-file=${root.resolve(it)}" }
+                p.lateEnvironmentFile?.let { args += "--env-file=${root.resolve(it)}" }
                 p.entrypoint?.let { args += "--entrypoint=$it" }
                 args += p.image
                 args += p.command
@@ -720,4 +1272,12 @@ internal class PrivateDeployment(private val base: Path, private val commands: R
             RuntimeStatus(p.id, it.getValue("Status").jsonPrimitive.content, it.getValue("ExitCode").jsonPrimitive.int)
         }
     }
+}
+
+/** Fixed production native credential actor: no caller-selected command or alternate store. */
+internal class NativePrivateTurnCredentialActuator : NativeTurnCredentialActuator {
+    override fun adopt(bundle: GenerationBundle, process: GenerationPin, operationId: String,
+        inputs: Map<String, String>): PublicTurnNativeObservation =
+        PrivateDeployment.real(bundle.members.associate { it.member.name to it.runtimeFingerprint })
+            .adoptEffectiveTurn(bundle, process, operationId, inputs)
 }

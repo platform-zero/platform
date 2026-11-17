@@ -1,0 +1,89 @@
+schemaVersion: 2
+id: private-synapse
+revision: 1
+product: synapse
+artifacts: [postgres-timescale, synapse]
+providers: [postgres, caddy]
+networks: [db-admin, synapse-data, synapse-web]
+providerNetworks:
+  postgres: [synapse-data]
+  caddy: [synapse-web]
+webNetworks: [synapse-web]
+exportedInputs: [rtc-registration.yaml]
+volumes:
+  - {id: synapse, userId: 991}
+inputs:
+  - {name: synapse-db-admin.env, owner: synapse, purpose: BOOTSTRAP, consumers: [synapse-db-init]}
+  - {name: synapse-runtime.env, owner: synapse, purpose: RUNTIME, consumers: [synapse]}
+  - {name: synapse-homeserver.yaml, owner: synapse, purpose: RUNTIME, consumers: [synapse]}
+  - {name: synapse-logging.yaml, owner: synapse, purpose: RUNTIME, consumers: [synapse]}
+  - {name: rtc-registration.yaml, owner: synapse, purpose: RUNTIME, consumers: [synapse]}
+  - {name: postgres-ca.pem, owner: postgres, purpose: RUNTIME, consumers: [synapse-db-init, synapse]}
+processes:
+  - id: synapse-db-init
+    artifact: postgres-timescale
+    userId: 999
+    oneShot: true
+    memoryMiB: 512
+    networks: [db-admin, synapse-data]
+    entrypoint: /bin/sh
+    environmentFile: synapse-db-admin.env
+    files:
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+    command:
+      - -ec
+      - |
+        export PGPASSWORD="$POSTGRES_PASSWORD"
+        psql -X -h postgres -U postgres -v ON_ERROR_STOP=1 <<SQL
+        CREATE ROLE synapse LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '$SYNAPSE_PASSWORD';
+        CREATE DATABASE synapse OWNER synapse ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0;
+        REVOKE ALL ON DATABASE synapse FROM PUBLIC;
+        SQL
+  - id: synapse-signing-key-init
+    artifact: synapse
+    userId: 991
+    oneShot: true
+    memoryMiB: 512
+    networks: [synapse-data]
+    entrypoint: /usr/local/bin/python
+    volumes:
+      - {volume: synapse, target: /data}
+    command:
+      - -c
+      - |
+        import os
+        from signedjson.key import generate_signing_key, write_signing_keys
+        os.umask(0o077)
+        with open('/data/homeserver.signing.key', 'x') as original:
+            write_signing_keys(original, [generate_signing_key('p0v3')])
+  - id: synapse
+    artifact: synapse
+    userId: 991
+    memoryMiB: 1024
+    networks: [synapse-data, synapse-web]
+    entrypoint: /usr/local/bin/python
+    command: [-m, synapse.app.homeserver, --config-path, /run/secrets/synapse-homeserver.yaml]
+    environmentFile: synapse-runtime.env
+    volumes:
+      - {volume: synapse, target: /data}
+    files:
+      - {file: synapse-homeserver.yaml, target: /run/secrets/synapse-homeserver.yaml}
+      - {file: synapse-logging.yaml, target: /run/secrets/synapse-logging.yaml}
+      - {file: rtc-registration.yaml, target: /run/secrets/rtc-registration.yaml}
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+    readinessHttpPort: 8008
+    readinessHttpPath: /health
+install:
+  processes: [synapse-db-init, synapse-signing-key-init, synapse]
+  dependencies:
+    synapse-db-init: [postgres]
+    synapse-signing-key-init: []
+    synapse: [synapse-db-init, synapse-signing-key-init, caddy]
+  databaseAccess:
+    - {consumer: synapse, provider: postgres, volume: postgres, database: synapse, principal: synapse, credentialFile: synapse-runtime.env, network: synapse-data}
+restore:
+  processes: [synapse]
+  dependencies:
+    synapse: [postgres, caddy]
+  databaseAccess:
+    - {consumer: synapse, provider: postgres, volume: postgres, database: synapse, principal: synapse, credentialFile: synapse-runtime.env, network: synapse-data}

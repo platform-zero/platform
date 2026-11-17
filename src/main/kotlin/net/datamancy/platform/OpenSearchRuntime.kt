@@ -41,6 +41,57 @@ internal object OpenSearchRuntime {
                     """.trimIndent()))
             )).also { PrivateDeployment.validate(it) }
     }
+    /** Specialized native mTLS search engine, not the Huly Elasticsearch provider. */
+    fun canonicalFragment(inventory: AcquiredInventory, name: String): CanonicalProviderFragment {
+        val original = spec(inventory, name)
+        val fragment = original.copy(store = RuntimeStore.CANONICAL_V2,
+            networks = listOf("opensearch-data"), processes = original.processes.map { process ->
+                process.copy(id = if (process.id == "search-config-init") "opensearch-config-init" else
+                    if (process.id == "search-security-init") "opensearch-security-init" else process.id,
+                    dependencies = process.dependencies.map { when (it) {
+                        "search-config-init" -> "opensearch-config-init"
+                        "search-security-init" -> "opensearch-security-init"
+                        else -> it
+                    } }, environmentFile = process.environmentFile?.let { "opensearch-$it" },
+                    files = process.files.map { it.copy(file = "opensearch-${it.file}") },
+                    networks = listOf("opensearch-data"))
+            })
+        PrivateDeployment.validate(fragment)
+        return CanonicalProviderFragment("opensearch", fragment)
+    }
+    fun canonicalInputs(certificates: Map<String, String> = PrivateSearchPki.generate()): Map<String, String> =
+        inputs(certificates).mapKeys { (key, _) -> "opensearch-$key" }
+
+    /** r9-only browser read role: Caddy receives a distinct client certificate,
+     * never the provider admin/node key. The exact generation CA signs all peers.
+     * Historical r7/r8 issuance and cold receipts are not changed. */
+    fun canonicalFreshInputs(): Map<String, String> {
+        val generated = PrivateSearchPki.generate(freshReader = true)
+        require(generated.keys == setOf("ca.pem", "node.pem", "node-key.pem", "admin.pem",
+            "admin-key.pem", "reader.pem", "reader-key.pem"))
+        val baseline = canonicalInputs(generated.filterKeys { it !in setOf("reader.pem", "reader-key.pem") })
+        return baseline + mapOf(
+            "opensearch-reader.pem" to generated.getValue("reader.pem"),
+            "opensearch-reader-key.pem" to generated.getValue("reader-key.pem"),
+            "opensearch-roles.yml" to (baseline.getValue("opensearch-roles.yml") +
+                "caddy_reader:\n  cluster_permissions: ['cluster:monitor/main', 'cluster:monitor/health']\n" +
+                "  index_permissions:\n    - index_patterns: ['*']\n      allowed_actions: ['read']\n  tenant_permissions: []\n"),
+            "opensearch-roles-mapping.yml" to (baseline.getValue("opensearch-roles-mapping.yml") +
+                "caddy_reader:\n  users: ['p0v3-caddy-reader']\n"))
+    }
+    fun coldRestoreFragment(fresh: CanonicalProviderFragment): CanonicalProviderFragment {
+        require(fresh.product == "opensearch" && fresh.spec.store == RuntimeStore.CANONICAL_V2 &&
+            fresh.spec.processes.map { it.id }.toSet() ==
+                setOf("opensearch-config-init", "opensearch", "opensearch-security-init") &&
+            fresh.spec.volumes.map { it.id }.toSet() == setOf("config", "data"))
+        val original = fresh.spec.processes.single { it.id == "opensearch" }
+        require(original.dependencies == listOf("opensearch-config-init") &&
+            original.files.map { it.file }.toSet().containsAll(setOf("opensearch-ca.pem", "opensearch-node.pem",
+                "opensearch-node-key.pem", "opensearch-opensearch.yml")))
+        val cold = fresh.spec.copy(processes = listOf(original.copy(dependencies = emptyList())))
+        PrivateDeployment.validate(cold)
+        return fresh.copy(spec = cold)
+    }
     fun inputs(certificates: Map<String, String>): Map<String, String> {
         require(certificates.keys == setOf("ca.pem", "node.pem", "node-key.pem", "admin.pem", "admin-key.pem"))
         return certificates + mapOf(

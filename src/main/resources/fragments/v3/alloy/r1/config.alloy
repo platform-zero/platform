@@ -1,0 +1,18 @@
+// No host journal or container socket mount. API ingestion is private and requires separate client admission.
+logging {
+  level = "info"
+  format = "logfmt"
+}
+loki.write "private" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+loki.source.api "ingest" {
+  http {
+    listen_address = "0.0.0.0"
+    listen_port = 3500
+  }
+  use_incoming_timestamp = true
+  forward_to = [loki.write.private.receiver]
+}

@@ -6,8 +6,11 @@ The target bundle hash and snapshot receipt hash must be anchored by the operato
 outside the recovery directory. Private controller records are trusted local inputs,
 not independent attestation against a compromised controller UID.
 """
+if not __debug__:
+    raise SystemExit("Optimized Python is prohibited")
 from pathlib import Path
 import re
+import json
 import ssl
 from identity_secrets import HASH, ID, digest, object_json, private_directory, private_read, require
 
@@ -16,13 +19,65 @@ RUNTIME_BASE = Path("/mnt/media/p0-v3/runtime-deployments")
 GENERATION = re.compile(r"q-[a-f0-9]{12}\Z")
 
 
+def verify_install(binding, *, generation_base=GENERATION_BASE, runtime_base=RUNTIME_BASE):
+    """Controller-pinned first-install Bao member reached its real uninitialized TLS API.
+
+    Stage may be paused before later Keykeeper processes; no global stage completion is
+    claimed and no root/unseal material is accepted as daemon input.
+    """
+    generation = binding.get("generation", "")
+    expected = binding.get("targetBundleSha256", "")
+    member = binding.get("member", "")
+    require(GENERATION.fullmatch(generation) and HASH.fullmatch(expected) and ID.fullmatch(member) and
+            HASH.fullmatch(binding.get("leafSha256", "")), "Pinned install generation required")
+    root = private_directory(Path(generation_base) / generation)
+    raw = private_read(root / "bundle.json")
+    require(digest(raw) == expected, "Install bundle changed")
+    bundle = object_json(raw)
+    require(bundle.get("request", {}).get("id") == generation and
+            bundle.get("recoverySourceArchiveSha256") is None and bundle.get("recoverySourceKopia") is None and
+            bundle.get("ownedUpdate") is None, "Not a fresh Bao installation")
+    pins = [p for p in bundle.get("members", []) if p.get("member", {}).get("name") == member]
+    require(len(pins) == 1, "Unique Bao member required")
+    pin = pins[0]
+    spec = pin["spec"]
+    bao = [p for p in spec.get("processes", []) if p.get("id") == "bao"]
+    require(len(bao) == 1 and not bao[0].get("oneShot", False) and
+            bao[0].get("command") == ["server", "-config=/run/secrets/bao.hcl"] and
+            bao[0].get("environmentFile") == "bao.env", "Only ordinary sealed Bao daemon may initialize")
+    intent = object_json(private_read(root / "stage.intent.json"))
+    member_intent = object_json(private_read(root / (member + ".stage.intent.json")))
+    statuses = json.loads(private_read(root / (member + ".stage.result.json")))
+    require(intent.get("action") == "stage" and member_intent.get("action") == "stage-member" and
+            intent.get("bundleSha256") == expected == member_intent.get("bundleSha256") and
+            intent.get("priorIntentSha256") is None and member_intent.get("priorIntentSha256") is None and
+            not (root / "isolate.intent.json").exists() and
+            isinstance(statuses, list) and len([p for p in statuses if p.get("id") == "bao" and
+                                                 p.get("state") == "running"]) == 1,
+            "Bao install member not staged and isolated from failed attempt")
+    runtime = private_directory(Path(runtime_base) / member)
+    manifest = private_read(Path(runtime_base) / (member + ".json"))
+    require(digest(manifest) == pin["manifestSha256"] and object_json(manifest) == spec,
+            "Installed Bao process manifest changed")
+    for file, checksum in pin["inputHashes"].items():
+        require(isinstance(file, str) and file not in (".", "..") and "/" not in file and HASH.fullmatch(checksum) and
+                digest(private_read(runtime / file)) == checksum, "Installed Bao input changed")
+    env = private_read(runtime / "bao.env").decode()
+    require(env == "BAO_ADDR=https://bao:8200\nBAO_CACERT=/run/secrets/ca.pem\nHOME=/tmp\n" and
+            binding.get("endpoint") == "https://bao:8200", "Install daemon cannot receive recovery authority")
+    certificate = ssl.PEM_cert_to_DER_cert(private_read(runtime / "web.pem").decode("ascii"))
+    require(digest(certificate) == binding["leafSha256"], "Installed Bao leaf changed")
+    return {"generation": generation, "member": member, "initialized": False, "publicActivation": False}
+
+
 def verify_recovery(binding, *, generation_base=GENERATION_BASE, runtime_base=RUNTIME_BASE):
     generation = binding.get("generation", "")
     expected = binding.get("targetBundleSha256", "")
     receipt_hash = binding.get("snapshotReceiptSha256", "")
     member = binding.get("member", "")
-    require(GENERATION.fullmatch(generation) and HASH.fullmatch(expected) and HASH.fullmatch(receipt_hash) and
-            ID.fullmatch(member), "Externally anchored recovery binding required")
+    kind = binding.get("memberKind", "bao")
+    require(kind in ("bao", "identity") and GENERATION.fullmatch(generation) and
+            HASH.fullmatch(expected) and HASH.fullmatch(receipt_hash) and ID.fullmatch(member), "Externally anchored recovery binding required")
     root = private_directory(Path(generation_base) / generation)
     def record(name):
         return object_json(private_read(root / name))
@@ -91,7 +146,26 @@ def verify_recovery(binding, *, generation_base=GENERATION_BASE, runtime_base=RU
             require(isinstance(file, str) and file not in (".", "..") and "/" not in file and HASH.fullmatch(checksum),
                     "Invalid input binding")
             require(digest(private_read(inputs / file)) == checksum, "Recovered runtime input changed")
-        if name == member:
+        if name == member and kind == "identity":
+            keycloak = [p for p in spec["processes"] if p["id"] == "keycloak"]
+            require(len(keycloak) == 1 and keycloak[0].get("environmentFile") == "identity-runtime.env" and
+                    keycloak[0].get("command") == ["start", "--optimized", "--spi-connections-jpa--quarkus--migration-strategy=validate"] and
+                    set(f["file"] for f in keycloak[0].get("files", [])) ==
+                    {"identity-web.pem", "identity-web-key.pem", "identity-ca.pem", "postgres-ca.pem"},
+                    "Exact recovered Keycloak daemon required")
+            env = private_read(inputs / "identity-runtime.env").decode()
+            pairs = [line.split("=", 1) for line in env.splitlines() if line]
+            require(all(len(pair) == 2 for pair in pairs), "Malformed identity environment")
+            environment = dict(pairs)
+            require(len(environment) == len(pairs) and
+                    environment.get("KC_HOSTNAME") == "https://auth.datamancy.net" and
+                    environment.get("KC_HTTP_ENABLED") == "false" and
+                    not any("BOOTSTRAP" in k or "UNSEAL" in k or "ROOT" in k for k in environment),
+                    "Identity recovery cannot boot with bootstrap authority")
+            certificate = ssl.PEM_cert_to_DER_cert(private_read(inputs / "identity-web.pem").decode("ascii"))
+            require(digest(certificate) == binding.get("backendLeafSha256"),
+                    "Recovered backend TLS certificate changed")
+        if name == member and kind == "bao":
             bao = [p for p in spec["processes"] if p["id"] == "bao"]
             require(len(bao) == 1 and bao[0].get("command") == ["server", "-config=/run/secrets/bao.hcl"] and
                     bao[0].get("environmentFile") == "bao.env", "Exact Bao daemon required")
@@ -105,4 +179,5 @@ def verify_recovery(binding, *, generation_base=GENERATION_BASE, runtime_base=RU
                     environment["BAO_CACERT"] == "/run/secrets/ca.pem", "Recovery endpoint differs from imported daemon")
             certificate = ssl.PEM_cert_to_DER_cert(private_read(inputs / "web.pem").decode("ascii"))
             require(digest(certificate) == binding.get("leafSha256"), "Recovery TLS identity differs from imported daemon")
-    return {"generation": generation, "snapshotId": lineage["snapshotId"], "publicActivation": False}
+    return {"generation": generation, "sourceGeneration": lineage["generation"],
+            "snapshotId": lineage["snapshotId"], "publicActivation": False}

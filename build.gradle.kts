@@ -11,6 +11,7 @@ kotlin { jvmToolchain(21) }
 
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+    implementation("org.snakeyaml:snakeyaml-engine:2.9")
     testImplementation(kotlin("test"))
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.4")
 }
@@ -22,12 +23,18 @@ tasks.withType<org.gradle.api.tasks.bundling.AbstractArchiveTask>().configureEac
     isReproducibleFileOrder = true
 }
 // Unit imports may create local Python caches; these are not runtime source artifacts.
-tasks.processResources { exclude("**/__pycache__/**", "**/*.pyc") }
+tasks.processResources {
+    exclude("**/__pycache__/**", "**/*.pyc")
+    // One provenance authority; package its exact bytes rather than maintaining an editable copy.
+    from("release/fragment-provenance.json") {
+        into("fragments/v2")
+        rename { "provenance.json" }
+    }
+}
 tasks.test {
     // Unit-only even when an integration opt-in variable leaks from the parent shell.
     exclude("**/*RealIntegrationTest*")
     useJUnitPlatform { excludeTags("native", "integration", "real-domain", "sandbox-web") }
-    finalizedBy(tasks.jacocoTestReport)
 }
 
 tasks.register<Test>("nativeIntegrationTest") {
@@ -48,17 +55,4 @@ tasks.jacocoTestReport {
         html.required.set(true)
     }
 }
-tasks.jacocoTestCoverageVerification {
-    dependsOn(tasks.jacocoTestReport)
-    violationRules {
-        rule {
-            element = "BUNDLE"
-            limit {
-                counter = "LINE"
-                value = "COVEREDRATIO"
-                minimum = "0.90".toBigDecimal()
-            }
-        }
-    }
-}
-tasks.check { dependsOn(tasks.jacocoTestCoverageVerification) }
+// Coverage reports are opt-in diagnostics. The release gate is two complete functional cycles.

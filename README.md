@@ -1,10 +1,47 @@
 # Platform Zero v3 — platform
 
-**Active work scope:** [complete implementation; unit tests only](docs/implementation-only.md). Runtime operations and qualification are paused. Earlier project test deployments are not permanently protected assets; no cleanup is being performed in this phase. Native results below are historical, artifact-bound evidence—not validation of current source changes.
+**Active work scope:** [rapid completion — current authority, backlog and verification record](docs/rapid-completion.md). Direct implementation, builds/tests/acquisition and bounded runtime integration through two full qualification cycles are authorized. No subagents or coverage quota. Public production cutover, historical RSS publication, broad cleanup and uncertain-effect replay remain unauthorized.
 
-**Sole-operator implementation progress:** [completion inventory and connected controller interfaces](docs/implementation-completion.md). The read-only census reports missing files/phases separately from semantic verification; registered commands do not imply complete canonical assembly or native qualification.
+**Latest development checks:** 775 Platform Kotlin tests passed, plus four opted-in native component checks (Quadlet 5.4.2 generator/effective-audit parser against synthetic systemd properties, and OpenSSL-backed input generation; no application deployment); the retained Acceptance Kotlin checkpoint is 97 passing tests; Python native adapter/projection and spool subsets passed 24 and 4 tests. The eight earlier lifecycle/RSS failures are resolved. Private observability owner/caller wiring is unit-tested, not live-qualified. Trusted producer/bootstrap keys and the release-artifact catalog remain unstaged at the configured paths; see [admission gaps](docs/operator-blockers.md). Complete canonical/workflow integration is still needed. **Qualification: 0/2.**
+
+**Sole-operator implementation progress:** [completion inventory and connected controller interfaces](docs/implementation-completion.md). The read-only census distinguishes missing declared files, incomplete phase declarations and related source from semantic verification; registered commands do not imply complete canonical assembly or native qualification.
 
 **Current qualification policy:** [AI-led repair and automated self-qualification](docs/completion-plan.md), with no human approval gates or subagents. A failed candidate may be fixed and retested; uncertainty must be reconciled and failures retained. The controller uses `ReleaseQualification`; candidate/correction history and invocation-bound native assertion execution are implemented in acceptance. The live whole-release actuator and real runner matrix remain unfinished; automated full-stack qualification is **0/2**. Earlier independent-review references describe historical scope, not the current approval policy.
+
+## YAML fragments: assembly and export checkpoint
+
+New PostgreSQL/Timescale and PostgreSQL-backed Forgejo declarations are packaged under
+`src/main/resources/fragments/v2/`, with strict typed loading, explicit fresh/cold graphs,
+protected-template contracts and hash-bound resources. Historical recipes are unchanged.
+
+```sh
+./gradlew run --args='release fragment-lint src/main/resources/fragments/v2/forgejo/r1/fragment.yaml'
+```
+
+This read-only command grants **no runtime authority**. The new `forgejo-pg-v2` recipe now
+supports bound assembly/protected preparation and exact cold projection. Offline
+`release generation-render INVENTORY ASSEMBLY_REQUEST NEW_OUTPUT_DIRECTORY` exports the
+graph, exact packaged sources/provenance and Quadlet bundle without credentials or admission.
+`release generation-quadlet-check INVENTORY ASSEMBLY_REQUEST` runs the real generator only.
+
+Execution remains blocked: the owned Quadlet installer/admission/stop protocol is not yet
+implemented, and direct-Podman fallback is explicitly refused. The original uncertain Timescale build was reconciled read-only without replay or a
+fabricated result. After two separately recorded failed recipe revisions, the corrected
+r4 offline build passed an in-image PostgreSQL/Timescale smoke test and was pinned in a
+**development-only** inventory. Packaged Forgejo r2 removes database-CREATE and
+extension authority from its migration/runtime roles; r3 and r4 separately correct
+Forgejo 17 JWT key encoding while preserving earlier bytes. An isolated native
+r4-fragment TLS/SQL/Forgejo migration pilot passed, but did not prove a serving
+application, Kopia restore, installed units or runtime admission. Required
+dedicated-user rootless CI, complete onboarding/recovery and genuine new-recipe
+install/restore remain unfinished. The development Forgejo template still disables Actions.
+See the [current implementation checkpoint](docs/rapid-completion.md#assembly--protected-input--quadlet-export-checkpoint).
+
+## Historical component evidence and interfaces
+
+The component results, fleet counts and earlier gaps below are artifact-bound historical
+checkpoints, not fresh host observations or proof of the current complete candidate.
+New-production backups require Kopia; historical capsule verification/extraction is retained.
 
 A [live private-generation lifecycle](docs/private-generation-runtime.md) now provides sealed input bindings, all-member audits, capacity admission, single-use staging and retained stop/fence reconciliation. Fresh five-service native exercises passed without changing the protected fleet; they are not full-stack installation/restore cycles. [Typed private assembly](docs/typed-generation-assembly.md) now resolves 35 recipe variants, checks primary ownership and prepares fresh protected inputs without hand-written runtime manifests; central whole-release wiring is still unfinished. [Encrypted cold capture](docs/generation-cold-capture.md) now exports declared state and inputs under all member locks with authenticated local custody; [authenticated extraction and strict tar inspection](docs/generation-recovery-preparation.md) now pass, including a native-discovered volume-root metadata correction. The [compiled foundation/SQL-cache restore adapter](docs/foundation-generation-restore.md) now passes native encrypted import, historical data/authentication checks and restart readback in fresh isolated targets. [Controller-owned import failure isolation](docs/import-fault-recovery.md) also passed an actual scoped controller-kill test and a caught partial-import integrity-failure test; original intents, outcomes and fences remain retained. This is five-service component proof, not full-stack qualification.
 
@@ -28,9 +65,9 @@ Commands: `site validate <sites.json> <site-id>`, `plan render <sites.json> <sit
 
 Site/workload IDs are bounded slugs; workloads must be explicitly named, cannot reuse any inventory service ID, and require a SHA-256-pinned image reference. Unknown config fields (including secrets, environment, routes and mounts) are rejected. Render order is stable; each file uses `Network=none` and `ReadOnly=true`. The JSON render plan includes the Quadlet text and is safe to compare in tests, but should **not** be interpreted as acceptance of that image or application. The isolated staging and rollback tests check filesystem behavior only. Do not copy these files to a live Quadlet search path until an independently reviewed deployment, backup, functional restore and acceptance process exists.
 
-## Verified unit coverage gate
+## Unit tests and optional coverage diagnostics
 
-Run `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 GRADLE_USER_HOME=/mnt/media/p0-v3/cache/gradle-user ./gradlew clean check --offline` to run the tests and the JaCoCo **LINE** covered-ratio verification gate (minimum **90%**, bundle-wide, all production JVM classes; no class, package or source exclusions). The `check` task depends on `jacocoTestCoverageVerification`, which depends on the XML/HTML report and tests. From a clean run: **1069 covered / 1167 total production Kotlin lines = 91.60%** (98 missed), with **48 tests discovered, 44 executed, 4 deliberately skipped real integration tests, 0 failures**. This clean run is not proof of live functionality. Report: `build/reports/jacoco/test/jacocoTestReport.xml` and `build/reports/jacoco/test/html/index.html`. This is unit/CLI/offline filesystem coverage, **not** functional deployment, backup/restore proof or full-stack acceptance.
+Use Java 21 and `./gradlew test` or `./gradlew check` for development tests. JaCoCo reports are optional (`./gradlew jacocoTestReport`); `test`/`check` no longer enforce a percentage threshold. The sole release-qualification gate is the two complete frozen-candidate cycles. The following counts are from an **earlier historical clean run**, not the current suite: **1069 covered / 1167 total production Kotlin lines = 91.60%** (98 missed), with **48 tests discovered, 44 executed, 4 deliberately skipped real integration tests, 0 failures**. This clean run is not proof of live functionality. Report: `build/reports/jacoco/test/jacocoTestReport.xml` and `build/reports/jacoco/test/html/index.html`. This is unit/CLI/offline filesystem coverage, **not** functional deployment, backup/restore proof or full-stack acceptance.
 
 ## Restricted real rootless Podman probe (NOT the catalog)
 

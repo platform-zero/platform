@@ -6,6 +6,12 @@ import java.nio.file.Path
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
+import java.net.InetSocketAddress
+import java.security.MessageDigest
+import java.security.cert.X509Certificate
+import java.time.Instant
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 
 @Serializable internal data class HttpsProvisionIntent(val operation: String, val bindingSha256: String,
     val before: JsonObject, val after: JsonObject, val configuration: JsonObject)
@@ -17,7 +23,8 @@ import kotlinx.serialization.json.*
  * edits host trust, replaces unrelated certificates, or retries a possibly dispatched write.
  */
 internal class CaddyHttpsProvisioner(private val root: Path, private val binding: CaddySiteBinding,
-    private val transport: CaddyTransport) {
+    private val transport: CaddyTransport, private val ingressAddress: String? = null,
+    private val nativeListenerAudit: ((Boolean) -> Unit)? = null) {
     companion object {
         private val json = Json { encodeDefaults = true }
         private val opPattern = Regex("r-[a-f0-9]{12}")
@@ -25,7 +32,9 @@ internal class CaddyHttpsProvisioner(private val root: Path, private val binding
         fun inRuntime(root: Path, binding: CaddySiteBinding, spec: PrivateDeploymentSpec, fingerprint: String): CaddyHttpsProvisioner {
             require(root == Path.of("/mnt/media/p0-v3/caddy-https").resolve(binding.site))
             NamespaceCaddyTransport.checkBinding(binding, spec)
-            return CaddyHttpsProvisioner(root, binding, NamespaceCaddyTransport.real(spec, fingerprint))
+            val primaryAddress = NamespaceCaddyTransport.ownedPublicAddress(spec, fingerprint)
+            return CaddyHttpsProvisioner(root, binding, NamespaceCaddyTransport.real(spec, fingerprint), primaryAddress,
+                { https -> NamespaceCaddyTransport.auditPublicListeners(spec, fingerprint, primaryAddress, https) })
         }
         fun real(root: Path, binding: CaddySiteBinding): CaddyHttpsProvisioner {
             require(root == Path.of("/mnt/media/p0-v3/caddy-https").resolve(binding.site))
@@ -35,8 +44,11 @@ internal class CaddyHttpsProvisioner(private val root: Path, private val binding
     init {
         // Reuse all route-binding admission, including loopback admin and exact non-apex hosts.
         TransactionalCaddy(root, binding, transport)
-        require(binding.server.length <= 56)
+        require(binding.server.length <= 56 && (ingressAddress == null ||
+            ingressAddress.matches(Regex("[0-9]{1,3}(\\.[0-9]{1,3}){3}")) &&
+            java.net.InetAddress.getByName(ingressAddress).isSiteLocalAddress))
     }
+    private fun publicListen(port: Int) = if (ingressAddress == null) ":$port" else "$ingressAddress:$port"
     private val httpServer = "${binding.server}-http01"
     private val policyId = "p0v3-${binding.site}-acme"
     private val bindingBytes get() = json.encodeToString(binding.copy(approvedHosts = binding.approvedHosts.toSortedSet())).toByteArray()
@@ -71,11 +83,39 @@ internal class CaddyHttpsProvisioner(private val root: Path, private val binding
         return json.parseToJsonElement(reply.body.decodeToString(throwOnInvalidSequence = true)).jsonObject to requireNotNull(reply.etag)
     }
     fun observeConfigurationSha256(): String = TransactionalCaddy.digest(observe().first)
+    /** Independently read Caddy's installed PRODUCTION ACME scheduler policy and durable store.
+     * Caddy, never this observer, performs due renewal. No forced issuance or temporary policy. */
+    fun ownedAutomaticRenewalPolicy(expectedConfiguration: String): String {
+        val config = observe().first
+        require(hashPattern.matches(expectedConfiguration) && TransactionalCaddy.digest(config) == expectedConfiguration)
+        val owned = owned(config)
+        require(policies(config).filter { it.jsonObject["@id"] != JsonPrimitive(policyId) }.all { policy ->
+            policy.jsonObject["subjects"]?.jsonArray?.all { subject ->
+                subject.jsonPrimitive.content.matches(Regex("[a-z0-9.-]+")) &&
+                    subject.jsonPrimitive.content !in binding.approvedHosts
+            } == true
+        } && obj(tls(config), "certificates").keys.all { it == "automate" }) {
+            "Unrelated policy or manual certificate overlaps owned renewal hosts"
+        }
+        val policy = owned["policy"]?.jsonObject ?: error("Owned native renewal policy absent")
+        require(owned["http"]?.jsonObject?.get("listen")?.jsonArray?.singleOrNull() == JsonPrimitive(publicListen(80)) &&
+            owned["https"]?.jsonObject?.get("listen")?.jsonArray?.singleOrNull() == JsonPrimitive(publicListen(443)) &&
+            policy["@id"] == JsonPrimitive(policyId) &&
+            policy["subjects"]?.jsonArray?.map { it.jsonPrimitive.content } == binding.approvedHosts.sorted() &&
+            policy["issuers"]?.jsonArray?.singleOrNull()?.jsonObject?.let { issuer ->
+                issuer["module"] == JsonPrimitive("acme") && issuer["ca"] == JsonPrimitive(AcmeEnvironment.PRODUCTION.directory)
+            } == true && owned["automate"]?.jsonArray?.map { it.jsonPrimitive.content } == binding.approvedHosts.sorted() &&
+            owned["https"] != JsonNull && owned["http"] != JsonNull &&
+            config["storage"]?.jsonObject?.let { storage ->
+                storage["module"] == JsonPrimitive("file_system") && storage["root"] == JsonPrimitive("/data/caddy")
+            } == true) { "Native Caddy production ACME renewal policy or durable store changed" }
+        return ReleaseLocks.sha256(json.encodeToString(owned).toByteArray())
+    }
     private fun challengeServer(nonces: Map<String, String>): JsonObject {
         require(nonces.keys == binding.approvedHosts && nonces.values.distinct().size == nonces.size &&
             nonces.values.all { it.matches(Regex("[a-zA-Z0-9_-]{32,128}")) })
         return buildJsonObject {
-            put("listen", buildJsonArray { add(":80") })
+            put("listen", buildJsonArray { add(publicListen(80)) })
             put("automatic_https", buildJsonObject { put("disable", true) })
             put("routes", buildJsonArray {
                 for ((host, nonce) in nonces.toSortedMap()) add(buildJsonObject {
@@ -122,7 +162,7 @@ internal class CaddyHttpsProvisioner(private val root: Path, private val binding
         require(storage["module"] == JsonPrimitive("file_system") && storage["root"] == JsonPrimitive("/data/caddy"))
         foreignPolicies(before)
         val https = buildJsonObject {
-            put("listen", buildJsonArray { add(":443") }); put("routes", JsonArray(emptyList()))
+            put("listen", buildJsonArray { add(publicListen(443)) }); put("routes", JsonArray(emptyList()))
             put("strict_sni_host", true)
             put("automatic_https", buildJsonObject { put("disable_redirects", true) })
             put("tls_connection_policies", buildJsonArray { add(buildJsonObject {
@@ -179,6 +219,7 @@ internal class CaddyHttpsProvisioner(private val root: Path, private val binding
             else -> error("Owned listener or policy diverged; retained pending operation")
         }
         require(!requireApplied || status == "applied")
+        if (status == "applied") nativeListenerAudit?.invoke(intent.after["https"] != JsonNull)
         val result = HttpsProvisionResult(intent.operation, ReleaseLocks.sha256(bytes), status, TransactionalCaddy.digest(config))
         val path = root.resolve("${intent.operation}.result.json")
         if (Files.exists(path, NOFOLLOW_LINKS)) {
@@ -195,5 +236,89 @@ internal class CaddyHttpsProvisioner(private val root: Path, private val binding
         val intent = json.decodeFromString<HttpsProvisionIntent>(bytes.decodeToString())
         require(intent.operation == operation && intent.bindingSha256 == ReleaseLocks.sha256(bindingBytes))
         complete(intent, bytes, false)
+    }
+}
+
+@Serializable internal data class PublicCertificateIdentity(val host: String, val sha256: String, val notAfter: String)
+@Serializable internal data class PublicRenewalIntent(val operation: String, val configurationSha256: String,
+    val nativePolicySha256: String, val previous: Map<String, PublicCertificateIdentity>, val budgetSeconds: Int)
+@Serializable internal data class PublicRenewalResult(val operation: String, val intentSha256: String,
+    val previous: Map<String, PublicCertificateIdentity>, val current: Map<String, PublicCertificateIdentity>,
+    val changed: Boolean)
+
+/** Observe Caddy's bounded automatic ACME renewal, never overwrite its old certificate or initiate
+ * an uncertain second issuance. Previous identity remains usable until a newly issued cert is read
+ * through validated public TLS with a strictly later expiry. Failure retains observation intent. */
+internal class CaddyPublicRenewal(private val root: Path, private val hosts: Set<String>,
+    private val configuration: () -> String, private val certificate: (String) -> PublicCertificateIdentity = ::observePublicCertificate,
+    private val sleep: (Long) -> Unit = Thread::sleep, private val nativePolicy: () -> String) {
+    private val json = Json { encodeDefaults = true }
+    fun observe(operation: String, expectedConfiguration: String, previous: Map<String, PublicCertificateIdentity>,
+        budgetSeconds: Int): PublicRenewalResult {
+        require(operation.matches(Regex("r-[a-f0-9]{12}")) && expectedConfiguration.matches(Regex("[a-f0-9]{64}")) &&
+            hosts.isNotEmpty() && hosts.size <= 64 && hosts.all(AcmePreflight.hostPattern::matches) && previous.keys == hosts &&
+            budgetSeconds in 10..300 && previous.all { (host, identity) ->
+                identity.host == host && identity.sha256.matches(Regex("[a-f0-9]{64}")) &&
+                    Instant.parse(identity.notAfter).isAfter(Instant.now())
+            } && configuration() == expectedConfiguration &&
+            hosts.sorted().associateWith(certificate) == previous) {
+            "Previous public certificate identity must be observed live before renewal admission"
+        }
+        val policySha = nativePolicy()
+        require(policySha.matches(Regex("[a-f0-9]{64}"))) { "Native Caddy renewal policy must be audited" }
+        val intent = PublicRenewalIntent(operation, expectedConfiguration, policySha, previous, budgetSeconds)
+        val bytes = json.encodeToString(intent).toByteArray()
+        val previousBinding = root.resolve("previous-${ReleaseLocks.sha256(json.encodeToString(previous).toByteArray())}.renewal")
+        ReleasePrivateFiles.locked(root) {
+            require(!Files.exists(root.resolve("renewal.pending"), NOFOLLOW_LINKS) &&
+                !Files.exists(previousBinding, NOFOLLOW_LINKS) &&
+                !Files.exists(root.resolve("$operation.intent.json"), NOFOLLOW_LINKS)) { "Uncertain or already renewed certificate revision retained" }
+            ReleasePrivateFiles.save(previousBinding, operation.toByteArray())
+            ReleasePrivateFiles.save(root.resolve("$operation.intent.json"), bytes)
+            ReleasePrivateFiles.save(root.resolve("renewal.pending"), bytes)
+        }
+        val deadline = System.nanoTime() + budgetSeconds * 1_000_000_000L
+        var observed: Map<String, PublicCertificateIdentity> = emptyMap()
+        do {
+            require(configuration() == expectedConfiguration && nativePolicy() == policySha) {
+                "Native Caddy renewal policy or generation changed during renewal"
+            }
+            observed = hosts.sorted().associateWith { certificate(it) }
+            require(observed.all { (host, current) -> current.host == host && current.sha256.matches(Regex("[a-f0-9]{64}")) &&
+                Instant.parse(current.notAfter).isAfter(Instant.now()) &&
+                (current == previous.getValue(host) ||
+                    (current.sha256 != previous.getValue(host).sha256 && Instant.parse(current.notAfter).isAfter(Instant.parse(previous.getValue(host).notAfter))))
+            }) { "Caddy returned a changed certificate without a later valid expiry; retain previous" }
+            if (observed.all { (host, current) -> current != previous.getValue(host) }) break
+            if (System.nanoTime() >= deadline) break
+            sleep(minOf(1_000L, (deadline - System.nanoTime()) / 1_000_000L).coerceAtLeast(1))
+        } while (System.nanoTime() < deadline)
+        require(observed.all { (host, current) -> current != previous.getValue(host) }) { "Public renewal not proven; prior certificate remains authoritative" }
+        val result = PublicRenewalResult(operation, ReleaseLocks.sha256(bytes), previous, observed, true)
+        ReleasePrivateFiles.locked(root) {
+            require(ReleasePrivateFiles.read(root.resolve("renewal.pending")).contentEquals(bytes))
+            ReleasePrivateFiles.save(root.resolve("$operation.result.json"), json.encodeToString(result).toByteArray())
+            ReleasePrivateFiles.removeExact(root.resolve("renewal.pending"), bytes)
+        }
+        return result
+    }
+}
+
+/** Hostname verification and the normal public trust chain are mandatory; no local trust override. */
+internal fun observePublicCertificate(host: String): PublicCertificateIdentity {
+    require(AcmePreflight.hostPattern.matches(host))
+    val socket = SSLSocketFactory.getDefault().createSocket() as SSLSocket
+    socket.use {
+        it.soTimeout = 5_000
+        it.connect(InetSocketAddress(host, 443), 5_000)
+        val parameters = it.sslParameters
+        parameters.endpointIdentificationAlgorithm = "HTTPS"
+        parameters.serverNames = listOf(javax.net.ssl.SNIHostName(host))
+        it.sslParameters = parameters
+        it.startHandshake()
+        val leaf = it.session.peerCertificates.first() as X509Certificate
+        leaf.checkValidity()
+        val digest = MessageDigest.getInstance("SHA-256").digest(leaf.encoded).joinToString("") { byte -> "%02x".format(byte) }
+        return PublicCertificateIdentity(host, digest, leaf.notAfter.toInstant().toString())
     }
 }

@@ -34,13 +34,15 @@ class GenerationRssPlanTest {
             processes = owners.map { SiteProcessOwner(it.key, it.value) },
             state = graph.state.map { SiteStateOwner(it.volume, owners.getValue(it.writers.first()), "cohort") },
             inputs = graph.inputs.map { SiteInputOwner(it.input, requireNotNull(it.compiledProduct), true, it.consumers) },
-            routes = listOf(SiteRouteOwner("social.datamancy.net", "mastodon", "$id-mastodon/social", 8080)))
-        val ownership = SiteOwnerships.bind(plan, contract, setOf("social.datamancy.net"))
+            routes = listOf(SiteRouteOwner("social.datamancy.net", "mastodon", "$id-mastodon/social", 8080)),
+            managed = GenerationManagedComponents.ownership(plan.generation))
+        val ownership: BoundSiteOwnership = SiteOwnerships.bind(plan, contract, setOf("social.datamancy.net"))
         val bundle = GenerationBundle(plan.generation, plan.specs.zip(plan.generation.members).map { (spec, member) ->
             val inputs = PrivateDeployment.inputNames(spec).associateWith { "c".repeat(64) }
             GenerationPin(member, ReleaseLocks.sha256(Json.encodeToString(spec).toByteArray()), inputs,
                 PrivateDeployment.expectedFingerprint(spec, inputs), spec)
-        }, plan.specs.sumOf { it.processes.sumOf { p -> p.memoryMiB.toLong() } } + GenerationRssPlan.MEMORY_MIB,
+        }, plan.specs.sumOf { spec -> spec.processes.filterNot { it.oneShot }.sumOf { p -> p.memoryMiB.toLong() } +
+            (spec.processes.filter { it.oneShot }.maxOfOrNull { p -> p.memoryMiB } ?: 0) } + GenerationRssPlan.MEMORY_MIB,
             assemblySha256 = graph.assemblySha256, ownership = ownership)
         val bundleBytes = json.encodeToString(bundle).toByteArray()
         val bundleHash = ReleaseLocks.sha256(bundleBytes)
@@ -49,7 +51,18 @@ class GenerationRssPlanTest {
             tokenDirectory = generation.resolve("rss/tokens").toString(), mastodonOrigin = rssPlan.mastodonOrigin,
             controllerSha256 = rssPlan.controllerSha256, artifactClosure = rssPlan.artifactClosure, userId = UnixSystem().uid.toInt())
         val scheduleRoot = generation.resolve("rss/schedule")
-        val authority = GenerationRssEnrollmentAuthority(generations)
+        val accounts = (RssPacks.load().map { it.feed.account } + "rss_observer").sorted()
+        val identityFixture = RssHttp { method, uri, headers, body ->
+            require(method == "GET" && uri.toString() == "https://social.datamancy.net/api/v1/accounts/verify_credentials" &&
+                body.isEmpty() && headers["Accept"] == "application/json")
+            val bearer = requireNotNull(headers["Authorization"]).removePrefix("Bearer ")
+            val name = accounts.single { bearer == "unit-local-$it-pinned-token-0123456789" }
+            val id = (accounts.indexOf(name) + 1).toString()
+            RssHttpReply(200, (if (name == "rss_observer")
+                """{"id":"$id","acct":"$name","following_count":47}"""
+            else """{"id":"$id","acct":"$name","bot":true}""").toByteArray())
+        }
+        val authority = GenerationRssEnrollmentAuthority(generations, identityFixture)
         val schedule = RssSchedule({ _, _ -> error("No activation in enrollment units") }, {},
             RssHttp { _, _, _, _ -> error("No network") }, enrollment = authority)
         init {
@@ -59,6 +72,12 @@ class GenerationRssPlanTest {
             ReleasePrivateFiles.save(generation.resolve("assembly.result.json"),
                 json.encodeToString(AssemblyPreparationOutcome(graph.assemblySha256, true, bundleHash)).toByteArray())
             GenerationRssPlan.prepare(generation)
+            val tokenRoot = generation.resolve("rss/tokens")
+            ReleasePrivateFiles.directory(tokenRoot)
+            for (name in RssPacks.load().map { it.feed.account }.toSet() + "rss_observer") {
+                ReleasePrivateFiles.save(tokenRoot.resolve("$name.token"),
+                    ("unit-local-$name-pinned-token-0123456789\n").toByteArray())
+            }
         }
         override fun close() { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
     }
@@ -76,7 +95,18 @@ class GenerationRssPlanTest {
         assertFails { GenerationRssPlan.prepare(f.generation) }
         val intent = Files.readAllBytes(f.generation.resolve("rss-enrollment.intent.json"))
         assertContentEquals(intent, Files.readAllBytes(f.generation.resolve("rss-enrollment.complete.json")))
-        assertFails { FoundationRestore.bundle(f.bundle, f.plan.inventory, "q-222222222222", "a".repeat(64), ColdRestoreCohort.WHOLE_RELEASE) }
+        val target = f.plan.generation.copy(id = "q-222222222222")
+        val projected = GenerationRssPlan.coldRecoveryTarget(f.plan.generation, target)
+        assertNull(projected.rssPlan)
+        assertEquals(f.plan.generation.rssPlan, projected.recoveredRssPlan)
+        val next = GenerationRssPlan.coldRecoveryTarget(projected,
+            projected.copy(id = "q-333333333333"))
+        assertNull(next.rssPlan)
+        assertEquals(projected.recoveredRssPlan, next.recoveredRssPlan)
+        assertEquals(target.id, projected.id)
+        assertEquals(RuntimeStore.CANONICAL_V2, projected.store)
+        assertFails { GenerationRssPlan.coldRecoveryTarget(f.plan.generation, target.copy(store = RuntimeStore.LEGACY)) }
+        assertFails { GenerationRssPlan.coldRecoveryTarget(f.plan.generation, target.copy(id = f.plan.generation.id)) }
     }
     @Test fun `foreign state origin artifact or generation refuses before creating schedule`(): Unit = Fixture().use { f ->
         for (bad in listOf(f.binding.copy(stateDirectory = f.root.resolve("state").toString()),

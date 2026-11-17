@@ -1,34 +1,58 @@
-# Sole-operator implementation completion
+# Implementation completion source status (historical checkpoints)
 
-The accepted implementation sequence is: executable completion inventory; canonical
-providers/managed-component contracts; identity/application/lane lifecycles; whole-release
-Kopia recovery and scheduling; transactional owned update/rollback/activation; scoped
-HTTPS/RSS; genuine acceptance adapters; frozen unit gates. All eight areas remain part
-of the completion requirement. Work is source-only with cached offline compilation and
-unit tests. No delegate, deployment, image build/pull, installed controller/timer,
-native/browser/Android/model journey, activation or qualification is authorized.
+> **Superseding authority and current backlog:** [rapid completion](rapid-completion.md).
+> Direct implementation and bounded execution through 2/2 are authorized; no subagents or
+> coverage quota. The source-only/two-worker restrictions below are historical.
 
-## Executable inventory
+> **Historical authority (superseded):** [two-worker plan](../../.coord/implementation-20261109T071312Z/plan-v2.md)
+> and [RUN](../../.coord/implementation-20261109T071312Z/RUN.md). At most two implementation
+> workers edit only exact ACTIVE-packet paths; the coordinator reviews, not concurrently
+> implements production code. Write source and test source only. **Do not execute** builds,
+> compilation, syntax/import/lint/format checks, test discovery/execution/coverage, the
+> implementation inventory, or native/runtime/acquisition/deployment effects. Future
+> execution needs separate authorization; source review and the checkpoints below are
+> not validation of changed source. Qualification remains **0/2**.
 
-Run from the workspace without importing any product or runner code:
+The historically accepted completion areas include canonical providers/managed-component
+contracts, identity/application/lane lifecycles, whole-release Kopia recovery/scheduling,
+owned update/rollback/activation, HTTPS/RSS and genuine acceptance adapters. None of
+these areas is complete merely because a source file or historical unit checkpoint exists.
+The current 39-product / 57-target / 107-variant scope is unchanged.
 
-```
-python3 platform/scripts/implementation_inventory.py
-```
+## Current read-only inventory
 
-`release/implementation-scope.json` maps every manifest target to one implementation
-workstream, its current interfaces/source paths and explicit blockers. The census binds
-its catalog/manifest/classification/scope inputs by hash and reports actual source-file
-presence, declared INSTALL/RESTORE phases and missing official Android pin metadata.
-It rejects foreign paths, links, duplicate ownership and inconsistent catalog/target
-sets. Output is diagnostic only: phase declarations and source presence do not prove
-semantic implementation, unit coverage, artifact availability or qualification. A manual
-`unit-verified` label is rejected rather than accepted without checkpoint evidence.
+Run `python3 platform/scripts/implementation_inventory.py` from the workspace root.
+This authorized diagnostic reads source and metadata without importing or executing
+product/runner code. It does not confer execution authority or evaluate qualification.
 
-The initial census reports 39 products, 57 targets and 107 variants, with 75 variants
-missing files and 83 missing at least one declared phase. This includes genuine remaining
-work; it is not a request to remove cases, weaken assertions or count health checks as
-business workflows. Current official pin gaps include Donetick and ONLYOFFICE.
+The diagnostic output is now **schema 2** (not a change to release evidence schemas):
+
+- `variantsWithMissingDeclaredFiles` and `missingDeclaredFileCount` count absent exact
+  manifest paths, separately from related implementation elsewhere.
+- `variantsWithIncompletePhaseDeclarations` and each case's `phaseDeclarations` describe
+  only `implementedPhases` metadata. They replace the ambiguous `missingPhases` terminology;
+  they do **not** count unimplemented workflows.
+- `relatedSources` hashes explicit `adapterSourceReferences` from
+  `release/implementation-scope.json`. These are leads for integration, not verified or
+  wired replacements for absent adapters. Missing related files remain visible.
+- Domain `declaredStatus` and `reportedBlockers` are identified as manual metadata,
+  not independently reconciled findings. `reportedQualification` identifies its policy
+  source rather than pretending to have inspected trial evidence.
+- Android pin findings concern catalog metadata only; availability, authenticity and
+  installed custody are not established by this census.
+
+The refreshed snapshot is
+[implementation-inventory-03.json](../../.coord/rapid-completion/implementation-inventory-03.json):
+**39 products / 57 targets / 107 variants**, **5 missing declared adapter files**, and
+**83 variants with incomplete phase declarations** (79 neither, 4 INSTALL only;
+24 declare both). All five missing adapters have explicitly referenced related source.
+Donetick and ONLYOFFICE still lack qualifying Android pin metadata in the catalog.
+
+This is not a completion percentage. Existing files and declared phases do not establish
+semantic implementation or passing workflows. Actual test checkpoints and the capability
+backlog are recorded in [rapid completion](rapid-completion.md). Historical inventory
+snapshots and qualification evidence are preserved; no manifest phase was promoted by
+this metadata correction.
 
 ## Reviewed integrations now connected
 
@@ -144,14 +168,17 @@ missing cold projections and metadata fidelity remain work.
 
 ## Verification and remaining authority
 
-Focused units cover CLI pre-effect rejection, typed operation mismatch, historical
-serialization, private/published Caddy endpoint binding, exact MatrixRTC roles, startup
-non-replay, missing state, partial/interrupted startup, failure-record collision,
-independent isolation, source-resume ordering and exact capacity boundaries. Native
-transports and services are mocked; no runtime operation is executed.
+Historical focused units covered CLI pre-effect rejection, typed operation mismatch,
+serialization, Caddy endpoint binding, MatrixRTC roles, startup non-replay,
+partial/interrupted startup, isolation and capacity boundaries. They used mocked native
+transports and services; they do not validate subsequent source changes.
 
-Frozen checkpoint evidence is retained under
-`.coord/delegation-20261103T001112Z/tests/` in the workspace. Each substantive batch must
-pass the complete affected offline gate at >=90% unit-only line coverage. Keep artifact
-production, missing implementation and deferred runtime validation separate. Full-stack
-qualification remains **0/2**.
+Historical frozen checkpoint evidence is retained under
+`.coord/delegation-20261103T001112Z/tests/` in the workspace. The former source-only ban
+and 90% coverage quota are superseded. Current builds/tests/acquisition and bounded runtime
+integration through qualification are authorized without subagents. The latest full units
+passed **726 Platform** and **97 Acceptance** tests; native adapter/projection and spool
+Python subsets passed **24** and **4** tests. See [rapid completion](rapid-completion.md)
+for exact logs, current capability backlog and missing authentic signed-input/trust custody.
+Keep source presence, artifact production, executed units and real workflow verification
+separate. Full-stack qualification remains **0/2**.

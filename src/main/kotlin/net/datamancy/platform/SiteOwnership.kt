@@ -1,5 +1,6 @@
 package net.datamancy.platform
 
+import java.nio.file.Path
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -12,7 +13,10 @@ import kotlinx.serialization.json.Json
 @Serializable internal data class SiteRouteOwner(val host: String, val product: String, val process: String, val port: Int)
 @Serializable internal data class SiteOwnership(val schemaVersion: Int = 1, val site: String,
     val assemblySha256: String, val processes: List<SiteProcessOwner>, val state: List<SiteStateOwner>,
-    val inputs: List<SiteInputOwner>, val routes: List<SiteRouteOwner>)
+    val inputs: List<SiteInputOwner>, val routes: List<SiteRouteOwner>,
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val managed: List<SiteManagedOwner> = emptyList())
 @Serializable internal data class SiteOwnershipReport(val site: String, val assemblySha256: String,
     val ownershipSha256: String, val missingCapabilities: Set<String>,
     val serviceArtifactProcesses: Map<String, List<String>>, val repeatedServiceArtifacts: Map<String, List<String>>,
@@ -48,17 +52,38 @@ internal object SiteOwnerships {
         require(bytes.size in 1..1048576) { "Missing or oversized site ownership contract" }
         return json.decodeFromString(bytes.decodeToString(throwOnInvalidSequence = true))
     }
-    private fun project(request: AssemblyRequest) = GenerationRequest(schemaVersion = request.schemaVersion,
+    internal fun project(request: AssemblyRequest) = GenerationRequest(schemaVersion = request.schemaVersion,
         id = request.id, candidateSha256 = request.candidateSha256,
-        members = request.selections.map { GenerationMember("${request.id}-${it.recipe}", it.dependencies.map { d -> "${request.id}-$d" }) },
+        members = request.selections.map { GenerationMember(GenerationAssembly.memberName(request.id, it.recipe),
+            it.dependencies.map { d -> GenerationAssembly.memberName(request.id, d) }) },
         diskReservationMiB = request.diskReservationMiB, memoryHeadroomMiB = request.memoryHeadroomMiB,
-        diskHeadroomMiB = request.diskHeadroomMiB, purpose = request.purpose, store = request.store, rssPlan = request.rssPlan)
+        diskHeadroomMiB = request.diskHeadroomMiB, purpose = request.purpose, store = request.store,
+        releaseCandidateSha256 = request.releaseCandidateSha256, rssPlan = request.rssPlan,
+        managedLanes = request.managedLanes, forgejoCi = request.forgejoCi,
+        baoBootstrapOperation = request.baoBootstrapOperation,
+        gatewayDenialProducer = request.gatewayDenialProducer,
+        predecessorDisposition = request.predecessorDisposition,
+        memberPredecessorDisposition = request.memberPredecessorDisposition,
+        abandonedPreparation = request.abandonedPreparation,
+        preparedNoStartPredecessor = request.preparedNoStartPredecessor,
+        failedPreUnitStagePredecessor = request.failedPreUnitStagePredecessor,
+        uncertainNativeImportPredecessor = request.uncertainNativeImportPredecessor,
+        isolatedRootlessProbePredecessor = request.isolatedRootlessProbePredecessor,
+        qc3PreparedNoStartPredecessor = request.qc3PreparedNoStartPredecessor,
+        q273UncertainImportPredecessor = request.q273UncertainImportPredecessor,
+        q583PreparedNoStartPredecessor = request.q583PreparedNoStartPredecessor,
+        isolatedFullWorklanePreparePredecessor = request.isolatedFullWorklanePreparePredecessor,
+        q9bColdPreparedUninstalledPredecessor = request.q9bColdPreparedUninstalledPredecessor,
+        q07PartialInstalledPredecessor = request.q07PartialInstalledPredecessor,
+        freshPlankaActorGrant = request.freshPlankaActorGrant,
+        workingBudget = request.workingBudget)
     fun bind(plan: AssemblyPlan, contract: SiteOwnership, approvedHosts: Set<String>,
         update: OwnedUpdateLineage? = null): BoundSiteOwnership {
         // Snapshot caller-owned collections before preparation callbacks can run.
         val binding = json.decodeFromString<BoundSiteOwnership>(json.encodeToString(BoundSiteOwnership(plan.summary, contract, approvedHosts)))
         val projected = project(binding.assembly.request)
         GenerationRssPlan.validateOwnership(projected, binding)
+        GenerationManagedComponents.checkOwnership(projected, binding.contract)
         require(projected == plan.generation && GenerationRuntime.validateScope(projected) ==
             binding.assembly.members.map { GenerationMember(it.name, it.dependencies) }) { "Ownership generation identity differs from compiled assembly" }
         val report = check(plan.copy(summary = binding.assembly), binding.contract, binding.approvedHosts, update)
@@ -66,13 +91,39 @@ internal object SiteOwnerships {
         return binding
     }
     fun checkSealed(bundle: GenerationBundle) {
+        GenerationManagedComponents.validate(bundle.request)
+        if (bundle.request.recoveredRssPlan != null || bundle.request.recoveryStateReservationMiB != null) {
+            require(bundle.ownership == null && bundle.assemblySha256 == null && bundle.ownedUpdate == null &&
+                (bundle.recoverySourceKopia != null || bundle.recoverySourceArchiveSha256 != null)) {
+                "Inert recovery state requires snapshot lineage and cannot inherit site authority"
+            }
+        }
         GenerationRssPlan.validateOwnership(bundle.request, bundle.ownership)
-        val binding = bundle.ownership ?: return
+        val binding = bundle.ownership ?: run {
+            require(bundle.request.managedLanes == null || bundle.recoverySourceKopia != null || bundle.recoverySourceArchiveSha256 != null) {
+                "Managed lane installation requires sealed site ownership"
+            }
+            return
+        }
+        GenerationManagedComponents.checkOwnership(bundle.request, binding.contract)
         val projected = project(binding.assembly.request)
         require(bundle.recoverySourceArchiveSha256 == null && bundle.recoverySourceKopia == null && projected == bundle.request &&
             GenerationRuntime.validateScope(projected) == bundle.members.map { it.member } &&
             bundle.assemblySha256 == binding.contract.assemblySha256) { "Foreign or inherited live site ownership" }
-        val plan = AssemblyPlan(binding.assembly, bundle.request, AcquiredInventory(1, "ownership-validation-only", emptyList()),
+        // The selected r9 contract has a genuine external native Kopia owner,
+        // not a process in the member spec. Reopen the exact original reviewed
+        // acquired inventory instead of pretending an empty inventory proves
+        // the Kopia image at the final sealed-bundle check.
+        val inventory=if (binding.assembly.request.selections.any { it.recipe in setOf(CanonicalSharedYamlGraph.R9_ASSEMBLY_RECIPE,
+                CanonicalSharedYamlGraph.R10_ASSEMBLY_RECIPE) }) {
+            val path=Path.of("/mnt/media/p0-v3/release-bootstrap-anchors/assembly/${bundle.request.id}/inventory.json")
+            val bytes=ReleasePrivateFiles.read(path,2097152)
+            require(ReleaseLocks.sha256(bytes)==binding.assembly.request.inventorySha256) {
+                "Sealed full-private ownership lost its original selected artifact inventory"
+            }
+            json.decodeFromString<AcquiredInventory>(bytes.decodeToString(throwOnInvalidSequence=true))
+        } else AcquiredInventory(1,"ownership-validation-only",emptyList())
+        val plan = AssemblyPlan(binding.assembly, bundle.request, inventory,
             bundle.members.map { it.spec }, emptyList())
         val report = check(plan, binding.contract, binding.approvedHosts, bundle.ownedUpdate)
         require(report.unverifiedProcessRoles.isEmpty()) { "Unverified sealed process ownership" }
@@ -83,7 +134,12 @@ internal object SiteOwnerships {
         }) { "Compiled specifications differ from assembly binding" }
     }
     private fun roles(plan: AssemblyPlan): Map<String, String> = plan.summary.members.flatMap { member ->
-        compiledRoles[member.recipe].orEmpty().map { (id, product) -> "${member.name}/$id" to product }
+        val roles = if (member.recipe in setOf(CanonicalSharedYamlGraph.RECIPE,
+                CanonicalSharedYamlGraph.R9_ASSEMBLY_RECIPE,
+                CanonicalSharedYamlGraph.R10_ASSEMBLY_RECIPE))
+            CanonicalSharedYamlGraph.processOwnersFor(plan.specs.single { it.name == member.name })
+        else compiledRoles[member.recipe].orEmpty()
+        roles.map { (id, product) -> "${member.name}/$id" to product }
     }.toMap()
     /** Read-only planning inventory: no owner guesses for unknown derived images and no credentials generated. */
     fun inspect(plan: AssemblyPlan): SiteOwnershipInventory {
@@ -97,18 +153,26 @@ internal object SiteOwnerships {
             m.processes.filter { p -> p.volumes.any { it.volume == v.id } }.map { "${m.name}/${it.id}" }.sorted(),
             m.databaseAccess.filter { it.volume == v.id }.map { "${m.name}/${it.consumer}" }.sorted()) } }
         val recipes = plan.summary.members.associate { it.name to it.recipe }
-        val inputs = plan.specs.flatMap { m -> PrivateDeployment.inputNames(m).map { file ->
-            val consumers = m.processes.filter { it.environmentFile == file || it.files.any { f -> f.file == file } }.map { "${m.name}/${it.id}" }.sorted()
-            SiteInputInventory("${m.name}/$file", consumers,
-                CompiledProcessOwners.inputOwner(recipes.getValue(m.name), file, consumers.map { roles[it] }.toSet()))
-        } }
+        val inputs = plan.specs.flatMap { m ->
+            val sourceOwners = if (recipes.getValue(m.name) in setOf(
+                CanonicalSharedYamlGraph.R9_ASSEMBLY_RECIPE, CanonicalSharedYamlGraph.R10_ASSEMBLY_RECIPE))
+                CanonicalSharedYamlGraph.inputOwnersFor(m) else null
+            PrivateDeployment.inputNames(m).map { file ->
+                val consumers = m.processes.filter { it.environmentFile == file || it.files.any { f -> f.file == file } }
+                    .map { "${m.name}/${it.id}" }.sorted()
+                SiteInputInventory("${m.name}/$file", consumers,
+                    sourceOwners?.get(file) ?: CompiledProcessOwners.inputOwner(recipes.getValue(m.name), file,
+                        consumers.map { roles[it] }.toSet()))
+            }
+        }
         val known = processes.filter { !it.oneShot && it.artifactProducts.size == 1 && it.artifactProducts.single() in GenerationAssembly.requiredCapabilities }
         val repeated = known.groupBy { it.artifactProducts.single() }.filterValues { it.size > 1 }.toSortedMap()
             .mapValues { (_, actors) -> actors.map { it.process }.sorted() }
         return SiteOwnershipInventory(assemblyDigest(plan), plan.summary.missingCapabilities, processes, state, inputs,
             repeated, processes.filter { !it.oneShot && it !in known }.map { it.process }.sorted(),
             plan.specs.sumOf { spec -> spec.processes.filterNot { it.oneShot }.sumOf { it.memoryMiB.toLong() } +
-                (spec.processes.filter { it.oneShot }.maxOfOrNull { it.memoryMiB } ?: 0) },
+                (spec.processes.filter { it.oneShot }.maxOfOrNull { it.memoryMiB } ?: 0) } +
+                GenerationManagedComponents.memoryReservationMiB(plan.generation),
             databaseAccess = plan.specs.flatMap { m -> m.databaseAccess.map { SiteDatabaseInventory(m.name, it) } })
     }
     /** Only snapshot-authenticated original initializers may disappear from an owned update.
@@ -156,6 +220,7 @@ internal object SiteOwnerships {
         }
         require(approvedHosts.size <= 64 && approvedHosts.all(hostname::matches)) { "Invalid site host boundary" }
         bound(plan)
+        GenerationManagedComponents.checkOwnership(plan.generation, contract)
         val members = plan.specs.associateBy { it.name }
         val processes = plan.specs.flatMap { member -> member.processes.map { "${member.name}/${it.id}" to it } }.toMap()
         val volumes = plan.specs.flatMap { member -> member.volumes.map { "${member.name}/${it.id}" } }.toSet()
@@ -172,7 +237,29 @@ internal object SiteOwnerships {
             "Ownership references a product absent from this assembly"
         }
         val owners = contract.processes.associate { it.process to it.product }
-        require(owners.values.toSet() == capabilities) { "Every selected capability needs an explicit process owner" }
+        for (member in plan.specs) for (process in member.processes) for (alias in process.networkAliases) {
+            require(owners["${member.name}/${process.id}"] == "caddy" && alias.host in approvedHosts &&
+                contract.routes.count { it.host == alias.host } == 1 && !process.oneShot) {
+                "Only the owned ingress daemon may resolve an approved generation-local public origin"
+            }
+        }
+        val nativeControls = if (plan.summary.request.selections.any {
+                it.recipe in setOf(CanonicalSharedYamlGraph.R9_ASSEMBLY_RECIPE,
+                    CanonicalSharedYamlGraph.R10_ASSEMBLY_RECIPE) ||
+                    it.recipe == CanonicalSharedYamlGraph.RECIPE &&
+                        CanonicalSharedYamlGraph.manifest().scope == "full-private"
+            }) {
+            require(plan.generation.rssPlan != null &&
+                plan.inventory.images.count { it.product == "kopia" } == 1 &&
+                contract.managed.any { it.component == ManagedComponentKind.RSS &&
+                    it.products == setOf("mastodon") }) {
+                "Kopia recovery and RSS publisher require genuine separate native owners"
+            }
+            setOf("kopia", "mastodon-rss-publisher")
+        } else emptySet()
+        require(owners.values.toSet() + nativeControls == capabilities) {
+            "Every selected capability needs an explicit process or bounded native-control owner"
+        }
         val roles = roles(plan)
         val requiredRoles = if (update == null) roles else updateRoles(plan, contract, approvedHosts, update)
         require(requiredRoles.all { (actor, product) -> owners[actor] == product }) { "Ownership differs from compiled service role" }
@@ -198,14 +285,20 @@ internal object SiteOwnerships {
             exact(input.consumers, expected, "input consumer")
             val products = expected.map { roles[it] }.toSet()
             val recipe = plan.summary.members.single { it.name == memberName }.recipe
-            val compiledOwner = if (update != null && products.isNotEmpty() && null !in products)
+            val compiledOwner = if (recipe in setOf(CanonicalSharedYamlGraph.R9_ASSEMBLY_RECIPE,
+                CanonicalSharedYamlGraph.R10_ASSEMBLY_RECIPE))
+                CanonicalSharedYamlGraph.inputOwnersFor(members.getValue(memberName))[file]
+            else if (update != null && products.isNotEmpty() && null !in products)
                 CompiledProcessOwners.sharedInputs[recipe]?.get(file) ?: CompiledProcessOwners.inputOwner(recipe, file, products)
             else CompiledProcessOwners.inputOwner(recipe, file, products)
             // Retiring a provider's initializer can leave its CA consumed only by clients.
             // Preserve the authenticated original owner, never reassign trust to a consumer.
             val retainedProviderInput = update != null && null !in products && compiledOwner == input.product &&
                 input.product in owners.values
-            require(input.consumers.any { owners.getValue(it) == input.product } || retainedProviderInput) {
+            val declaredProviderExport = compiledOwner == input.product && input.product in owners.values &&
+                (FragmentRecipes.exportedProviderInput(members.getValue(memberName), file, input.product) ||
+                    CanonicalSharedYamlGraph.exportedProviderInput(members.getValue(memberName), file, input.product))
+            require(input.consumers.any { owners.getValue(it) == input.product } || retainedProviderInput || declaredProviderExport) {
                 "Input owner is not a declared consumer or authenticated surviving provider"
             }
             if (null !in products) {

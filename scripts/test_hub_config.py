@@ -9,7 +9,12 @@ import unittest
 from unittest.mock import Mock, patch
 
 SOURCE = Path(__file__).parents[1] / 'src/main/resources/runtime/hub-config.py'
-modules = {name: types.ModuleType(name) for name in ('jupyterhub', 'jupyterhub.auth', 'jupyterhub.spawner')}
+modules = {name: types.ModuleType(name) for name in ('jupyterhub', 'jupyterhub.auth',
+    'jupyterhub.spawner', 'tornado', 'tornado.web')}
+class HTTPError(Exception):
+    def __init__(self, status_code, message):
+        super().__init__(message); self.status_code = status_code
+modules['tornado.web'].HTTPError = HTTPError
 modules['jupyterhub.auth'].Authenticator = type('Authenticator', (), {})
 modules['jupyterhub.spawner'].Spawner = type('Spawner', (), {})
 with patch.dict(sys.modules, modules):
@@ -48,9 +53,11 @@ class HubConfigTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_dynamic_users_or_named_servers(self):
         self.spawner.user.name = 'outsider'
-        with self.assertRaises(ValueError): self.spawner.entry()
+        with self.assertRaises(HTTPError) as denied: self.spawner.entry()
+        self.assertEqual(denied.exception.status_code, 403)
         self.spawner.user.name = 'alice'; self.spawner.name = 'other'
-        with self.assertRaises(ValueError): self.spawner.entry()
+        with self.assertRaises(HTTPError) as named: self.spawner.entry()
+        self.assertEqual(named.exception.status_code, 403)
 
     async def test_native_lifecycle_acknowledgments_and_failures(self):
         async def request(action, method='GET'):

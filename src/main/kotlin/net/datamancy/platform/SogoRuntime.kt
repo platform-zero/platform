@@ -38,6 +38,89 @@ internal object SogoRuntime {
                 memoryMiB = 384, readiness = listOf("/usr/bin/curl", "--fail", "--silent", "--max-time", "3", "--cacert", "/run/secrets/ca.pem", "https://groupware:8443/SOGo/"), apparmorProfile = "p0v3-private-v1")
         )).also { PrivateDeployment.validate(it) }
     }
+    /** One shared Postgres, Memcached and original mail provider; the V1 local SQL/cache
+     * recipe above stays unchanged for historical source fingerprints. */
+    fun canonicalFragment(inventory: AcquiredInventory, base: PrivateDeploymentSpec): CanonicalProviderFragment {
+        require(base.store == RuntimeStore.CANONICAL_V2 &&
+            base.processes.any { it.id == "postgres" && !it.oneShot } &&
+            base.processes.any { it.id == "memcached" && !it.oneShot })
+        val old = spec(inventory, base.name, mailEnabled = true)
+        val pg = base.processes.single { it.id == "postgres" }
+        val sql = RuntimeProcess("sogo-db-init", pg.image, pg.imageId, pg.userId,
+            dependencies = listOf("postgres"), entrypoint = "/usr/lib/postgresql/17/bin/psql",
+            command = listOf("-X", "-v", "ON_ERROR_STOP=1", "-f", "/run/secrets/sogo-setup.sql"),
+            environmentFile = "sogo-db-admin.env", oneShot = true, networks = listOf("db-admin"),
+            files = listOf(RuntimeFile("sogo-setup.sql", "/run/secrets/sogo-setup.sql"),
+                RuntimeFile("postgres-ca.pem", "/run/secrets/postgres-ca.pem")),
+            apparmorProfile = "p0v3-private-v1")
+        val original = old.processes.associateBy { it.id }
+        val daemon = original.getValue("sogod").copy(dependencies = listOf("sogo-db-init", "memcached", "mail"),
+            networks = listOf("sogo-data", "sogo-cache", "sogo-web", "mail-data"),
+            files = listOf(RuntimeFile("sogo.conf", "/etc/sogo/sogo.conf"),
+                RuntimeFile("postgres-ca.pem", "/run/secrets/db-ca.pem"),
+                RuntimeFile("mail-ca.pem", "/etc/ssl/certs/ca-certificates.crt")))
+        val web = original.getValue("groupware").copy(networks = listOf("sogo-web"),
+            environmentFile = "sogo-web.env",
+            files = original.getValue("groupware").files.map { file -> when (file.file) {
+                "ca.pem", "web.pem", "web-key.pem" -> file.copy(file = "sogo-${file.file}")
+                "apache.conf" -> file.copy(file = "sogo-apache.conf")
+                else -> file
+            } })
+        return CanonicalProviderFragment("sogo", PrivateDeploymentSpec(name = base.name, store = base.store,
+            volumes = listOf(RuntimeVolume("home", 994)), processes = listOf(sql, daemon, web),
+            networks = listOf("sogo-data", "sogo-cache", "sogo-web", "mail-data"),
+            databaseAccess = listOf(RuntimeDatabaseAccess("sogod", "postgres", "postgres", "sogo",
+                "sogo", "sogo.env", "sogo-data"))),
+            webNetworks = setOf("sogo-web"), providerNetworks = mapOf(
+                "postgres" to setOf("sogo-data"), "memcached" to setOf("sogo-cache")))
+    }
+
+    fun canonicalColdFragment(inventory: AcquiredInventory, base: PrivateDeploymentSpec,
+        original: CanonicalProviderFragment): CanonicalProviderFragment {
+        val fresh = canonicalFragment(inventory, base)
+        require(original == fresh) { "Foreign SOGo original calendar/mail/database source" }
+        val cold = fresh.spec.copy(processes = fresh.spec.processes.filterNot { it.id == "sogo-db-init" }
+            .map { if (it.id == "sogod") it.copy(dependencies = listOf("postgres", "memcached", "mail")) else it })
+        require(cold.processes.none { it.oneShot } && cold.volumes == fresh.spec.volumes)
+        return fresh.copy(spec = cold)
+    }
+
+    fun canonicalInputs(users: Map<String, String>, postgresAdmin: String,
+        postgresTls: Map<String, String>,
+        pki: (String) -> Map<String, String> = { host ->
+            require(host == "groupware.datamancy.net")
+            PrivateWebPki.generate("groupware", dnsNames = listOf("groupware", host)) }): Map<String, String> {
+        require(postgresTls.keys == setOf("postgres-ca.pem", "postgres.pem", "postgres-key.pem") &&
+            postgresTls.values.all { it.isNotBlank() } &&
+            postgresAdmin.matches(Regex("[a-f0-9]{64}")) && users.keys == setOf("alice", "bob", "outsider") &&
+            users.values.all { it.matches(Regex("[a-f0-9]{64}")) } && users.values.toSet().size == 3)
+        // Backend Apache private SNI is a sealed prerequisite, not Caddy's public
+        // ACME_PUBLIC original-host identity, which is adopted after target startup.
+        val old = inputs(users, mailEnabled = true, pki = { host ->
+            if (host == "database") mapOf("ca.pem" to postgresTls.getValue("postgres-ca.pem"),
+                "web.pem" to postgresTls.getValue("postgres.pem"),
+                "web-key.pem" to postgresTls.getValue("postgres-key.pem"))
+            else pki("groupware.datamancy.net")
+        })
+        val admin = old.getValue("bootstrap.env")
+        val password = Regex("(?m)^SOGO_PASSWORD=([a-f0-9]{64})$").find(admin)?.groupValues?.get(1)
+        require(password != null)
+        val config = old.getValue("sogo.conf")
+            .replace("@database:5432", "@postgres:5432")
+            .replace("SOGoMemcachedHost = \"cache:11211\"", "SOGoMemcachedHost = \"memcached:11211\"")
+            .replace("\"127.0.0.1\", \"groupware\"", "\"127.0.0.1\", \"groupware.datamancy.net\"")
+        val apache = old.getValue("apache.conf").replace("groupware:8443", "groupware.datamancy.net")
+        require("@postgres:5432" in config && "cache:11211" !in config &&
+            "groupware.datamancy.net" in config && "groupware.datamancy.net" in apache)
+        return old.filterKeys { it in setOf("ca.pem", "web.pem", "web-key.pem", "web.env") }
+            .mapKeys { (file, _) -> if (file in setOf("ca.pem", "web.pem", "web-key.pem", "web.env")) "sogo-$file" else file } + mapOf(
+            "sogo.env" to old.getValue("sogo.env") + "SOGO_DB_PASSWORD=$password\n",
+            "sogo.conf" to config, "sogo-apache.conf" to apache,
+            "sogo-setup.sql" to old.getValue("setup.sql"),
+            "sogo-db-admin.env" to "PGHOST=postgres\nPGDATABASE=postgres\nPGUSER=postgres\nPGPASSWORD=$postgresAdmin\nPGSSLMODE=verify-full\nPGSSLROOTCERT=/run/secrets/postgres-ca.pem\nSOGO_PASSWORD=$password\n" +
+                users.entries.joinToString("") { "${it.key.uppercase()}_PASSWORD=${it.value}\n" })
+    }
+
     fun inputs(users: Map<String, String> = listOf("alice", "bob", "outsider").associateWith { RuntimePreparation.password() },
         mailEnabled: Boolean = false,
         pki: (String) -> Map<String, String> = { PrivateWebPki.generate(it) }): Map<String, String> {

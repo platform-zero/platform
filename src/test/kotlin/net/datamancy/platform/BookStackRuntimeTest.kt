@@ -9,6 +9,34 @@ class BookStackRuntimeTest {
     private val inventory = AcquiredInventory(1, "candidate", listOf("mariadb", "memcached", "bookstack").map {
         AcquiredImage(it, "upstream", "example.org/app:1", image, "b".repeat(64), emptyList(), image.substringAfter('@'), "amd64", "linux")
     })
+    @Test fun `v2 wiki uses original OIDC owner and shared MariaDB rather than copying provider authority`() : Unit {
+        val fresh = BookStackRuntime.releaseFragment(inventory, "canonical-release-v2")
+        assertEquals("bookstack", fresh.product)
+        assertEquals(setOf("bookstack-data"), fresh.providerNetworks.getValue("mariadb"))
+        assertEquals(setOf("bookstack-web"), fresh.webNetworks)
+        assertFalse(fresh.spec.processes.any { it.id in setOf("mariadb", "memcached") })
+        assertEquals(setOf("bookstack_migrate", "bookstack_runtime"), fresh.spec.databaseAccess.map { it.principal }.toSet())
+        val cold = BookStackRuntime.releaseColdFragment(fresh)
+        assertEquals(fresh.spec.volumes, cold.spec.volumes)
+        assertEquals(setOf("bookstack-php", "bookstack"), cold.spec.processes.map { it.id }.toSet())
+        assertTrue(cold.spec.processes.none { it.environmentFile == "bookstack-migration.env" })
+        assertEquals(listOf("mariadb"), cold.spec.processes.single { it.id == "bookstack-php" }.dependencies)
+        val inputs = BookStackRuntime.releaseInputs(CanonicalMariaCredentialPair("2".repeat(64), "1".repeat(64)),
+            "base64:" + "A".repeat(43) + "=", "123e4567-e89b-12d3-a456-426614174000",
+            "3".repeat(64), "4".repeat(64))
+        assertEquals(PrivateDeployment.inputNames(fresh.spec).toSet() - setOf("mariadb-ca.pem"), inputs.keys)
+        assertContains(inputs.getValue("bookstack-runtime.env"), "AUTH_METHOD=oidc")
+        // Pinned BookStack v26.09.2 app/Config/database.php reads MYSQL_ATTR_SSL_CA,
+        // not DB_SSL_CA or the invented DB_SSL_VERIFY_CERT switch.
+        for (file in listOf("bookstack-runtime.env", "bookstack-migration.env")) {
+            assertContains(inputs.getValue(file), "MYSQL_ATTR_SSL_CA=/run/secrets/mariadb-ca.pem")
+            assertFalse(inputs.getValue(file).contains("DB_SSL_CA="))
+        }
+        assertContains(inputs.getValue("bookstack-admin.php"), "'--external-auth-id'")
+        assertFalse(inputs.getValue("bookstack-runtime.env").contains("P0V3_INITIAL_ADMIN_PASSWORD"))
+        assertFails { BookStackRuntime.releaseColdFragment(cold) }
+    }
+
     @Test fun `private wiki uses dedicated database and replaces default administrator before serving`() {
         val spec = BookStackRuntime.spec(inventory)
         assertEquals(6, PrivateDeployment.validate(spec).size)

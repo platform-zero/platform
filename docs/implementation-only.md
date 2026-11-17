@@ -1,35 +1,44 @@
-# Current work scope: complete implementation, unit tests only
+# Implementation scope and historical checkpoints
 
-The user has requested **all remaining implementation work**, but **no testing beyond unit tests for now**. This instruction supersedes the earlier native-test-per-increment cadence. It does not reduce the eventual 39-family completion requirements.
+> **Superseding authority:** [rapid completion](rapid-completion.md). Direct implementation,
+> builds/tests/acquisition and bounded execution through 2/2 are now authorized, without
+> subagents or coverage quotas. Everything below describes earlier checkpoints and limits,
+> not current execution authority.
+
+## Archived source-only policy (superseded; do not apply)
+
+> **Historical authority:** [approved two-worker replan](../../.coord/implementation-20261109T071312Z/plan-v2.md), [RUN](../../.coord/implementation-20261109T071312Z/RUN.md). At most two implementation workers. Write production code and tests; execute **no** compilation, builds, syntax/import/lint/format checks, tests/discovery/coverage, inventory scripts or native operations. Earlier sole-operator, twelve-worker and unit-execution permissions below are superseded. Preserve their historical evidence; do not treat it as validation of changed source. Qualification **0/2**.
+
+That earlier approval limited implementation to **at most two implementation workers**, with a reviewing coordinator and ACTIVE-packet source/test edits only. It prohibited execution at that checkpoint. Rapid completion supersedes those restrictions: direct implementation and bounded execution through 2/2 are now authorized. The full 39-product / 57-target / 107-variant scope remains.
 
 ## Delegated implementation checkpoint (2026-11-03)
 
-The user authorized twelve shared-checkout OpenAI `gpt-6-astra` delegates, then directed their cleanup and **sole-operator continuation**. All twelve delegate panes and their dedicated workspace were closed on 2026-11-03; handoffs, terminal snapshots and test evidence were retained, and all source ownership transferred to COORD. No new delegation is authorized. Repository input fingerprints and coordinator-only offline checks still apply.
+Historically, the user authorized twelve shared-checkout OpenAI `gpt-6-astra` delegates, then directed their cleanup and **sole-operator continuation**. All twelve delegate panes and their dedicated workspace were closed on 2026-11-03; handoffs, terminal snapshots and test evidence were retained, and source ownership was transferred to COORD at that checkpoint. This paragraph records the earlier arrangement, not current staffing, write authority or permission to run offline checks.
 
-The latest completed unit checkpoints are:
+The completed unit checkpoints at that historical stage were:
 
 - Keykeeper: **29 tests passed; 607/652 unit lines (93.10%)**.
 - Worklane: after the formatting fix, **146 Rust tests plus four embedded-Python units passed; 12,214/13,537 unit lines (90.23%)**. The frozen recheck also passed `cargo fmt --check`.
 - Acceptance: **58 Kotlin tests passed; 1,187/1,237 unit lines (95.96%)**; a further **116 mocked Python tests passed**. The changed Matrix browser driver compiled against cached dependencies but was **not launched**.
 - Platform: the sole-operator recheck passed **422 Kotlin tests and 181 mocked Python tests; 9,277/10,196 unit lines (90.99%)**. The five initial delegated-checkpoint failures are resolved. Owned-update ownership now requires retained original metadata authenticated by the snapshot's source-bundle digest, retires only original initializer roles, preserves every daemon and original site/state/input authority, and retains explicit provider ownership of shared trust inputs. Fresh-install validation stays strict. Native owned-update import/start/activation remains incomplete and refused.
 
-Every reported checkpoint retained identical before/after source fingerprints. Evidence is under `.coord/delegation-20261103T001112Z/tests/` in the workspace. Subsequent source edits require a new checkpoint.
+Every reported historical checkpoint retained identical before/after source fingerprints. Evidence is under `.coord/delegation-20261103T001112Z/tests/` in the workspace. Those results do not validate subsequent source edits. Later executed checks and their exact scope are recorded in [rapid completion](rapid-completion.md).
 
-The sole-operator continuation now connects the reviewed CLI/MatrixRTC registrations, pinned namespace-aware release ingress, and once-only imported startup. See [implementation completion progress and interfaces](implementation-completion.md) and the read-only `scripts/implementation_inventory.py` census. The `completion-02-restored-start` checkpoint passed **427 Kotlin + 185 Python tests**, **9,391/10,324 Kotlin unit lines (90.96%)**, with unchanged fingerprints. The capacity/census changes subsequently passed `completion-03-capacity-inventory`. Follow-up late-bound qualification, durable RSS maintenance and guarded Home Assistant recovery are documented in [implementation completion progress](implementation-completion.md); their exact frozen verification records are retained separately. These do not close the full implementation scope.
+The historical sole-operator continuation connected the reviewed CLI/MatrixRTC registrations, pinned namespace-aware release ingress, and once-only imported startup. See [implementation completion progress and interfaces](implementation-completion.md) and the read-only `scripts/implementation_inventory.py` census. The `completion-02-restored-start` checkpoint passed **427 Kotlin + 185 Python tests**, **9,391/10,324 Kotlin unit lines (90.96%)**, with unchanged fingerprints. The capacity/census changes subsequently passed `completion-03-capacity-inventory`. Follow-up late-bound qualification, durable RSS maintenance and guarded Home Assistant recovery are documented in [implementation completion progress](implementation-completion.md); their exact frozen verification records are retained separately. These do not close the full implementation scope.
 
-These are partial implementation handoffs, not completion. Acceptance now declares **57 targets / 107 variants**, but D12 reports **75 variants without adapter files**, plus additional phase/artifact gaps. Canonical closure, owned-update native import/activation, RSS-wide backup quiescence/state custody, managed-lane integration and genuine missing client adapters remain implementation work. No native/runtime/qualification operation occurred; **qualification remains 0/2**. Older per-increment evidence below is historical, not validation of the changed tree.
+These are partial implementation handoffs, not completion. Acceptance declared **57 targets / 107 variants**; D12's historical report listed **75 variants without adapter files**, plus phase/artifact gaps. That is not the current census: the latest diagnostic distinguishes **5 missing exact adapter paths** from **83 incomplete phase declarations**, without inferring a completion percentage. Canonical closure, owned-update native import/activation, RSS-wide backup quiescence/state custody, managed-lane integration and genuine missing client adapters remain implementation work. No native/runtime/qualification operation occurred; **qualification remains 0/2**. Older per-increment evidence below is historical, not validation of the changed tree.
 
-## Boundaries
+## Historical boundaries (superseded, retained for context)
 
-- Edit code, configuration templates, image recipes, real runner implementations and documentation. Compile/package locally with existing cached toolchains; use offline builds and unit tests.
+- Write only source, test source and documentation paths granted by an ACTIVE packet. Do not compile, package, format, lint, run unit tests, inventory scripts, coverage, syntax/import checks or project checks. Source read/search/diff is permitted; source review is not validation.
 - Do not deploy, pull/build images, operate Podman/systemd, start/restart applications, run native fault probes, browser/Android journeys, model-provider requests, ACME/RSS/mail operations, or qualification cycles.
 - Do not clean up or reconcile existing live/test resources during this phase. The interrupted tamper scope `q-02d58ff35358` remains unresolved; it has not been replayed by this implementation increment.
 - Earlier project-created test deployments are **not inherently protected assets**. The earlier blanket preservation policy was incorrect. They remain unchanged now because runtime operations are outside this phase, not because every old fixture must exist indefinitely. Unrelated services, media, accounts and workspaces remain outside project ownership.
-- Preserve dirty/untracked source work. Continue as sole operator; no delegates or nested delegation. No remote Worklane release gate, `dist/` publication, toolchain installation or commits.
-- Use focused unit checks during development and batch complete coverage gates at meaningful checkpoints. Every new test must cover a requirement, a defect or a changed safety boundary.
-- Maintain at least 90% unit-only line coverage in all four repositories. Integration exclusions are not passing native tests.
+- Preserve dirty/untracked source work. Use at most two implementation workers, one ACTIVE packet each; no nested agents or unassigned edits. The coordinator reviews and decides, not a concurrent third production worker. No remote Worklane release gate, `dist/` publication, toolchain installation or commits.
+- Write focused source tests for requirements, defects and safety boundaries without executing or discovering them. Historical checks cannot validate changed source. Coverage gates await separate authorization.
+- The superseded policy required 90% unit-only line coverage in each of four repositories. That quota is no longer a release gate; historical coverage cannot validate changed source or serve as native evidence.
 
-## Implemented in the current source increment
+## Implementation recorded at that source checkpoint
 
 ### Unit task separation
 
@@ -71,7 +80,7 @@ RSS now implements read-only reconciliation against the token's bot identity and
 
 Delegated source now adds the production reference ledger, weekly restore controller/CLI and native retention registration. Capture, held-source and import reference hooks are integrated, but full RSS job exclusion and reference-writer integration review remain outstanding; this is not a completed scheduled-recovery system. There is no permissive default authority. See [Kopia retention contracts](kopia-retention.md) for the earlier actuator baseline. Its historical pre-delegation checkpoint was **287 passed, 6,523/7,182 lines (90.82%)**; the newer passing sole-operator checkpoints above supersede that historical validation status. No native operation occurred.
 
-## Remaining implementation — not merely deferred tests
+## Historical remaining-work list — not the current backlog
 
 The whole plan is **not yet implemented**. Continue source work on:
 
@@ -82,7 +91,7 @@ The whole plan is **not yet implemented**. Continue source work on:
 5. HTTPS/listener/renewal provisioning and integration of the implemented transactional cutover; installed RSS scheduling and integration of explicit uncertain-send reconciliation.
 6. Real invocation-bound native/browser/Android runner implementations and complete official-client classification/manifest coverage.
 
-Implement those paths without executing their runtime operations. Do not replace missing implementations with green fixture results or relabel unfinished code as a runtime-validation prerequisite.
+The historical instruction deferred runtime execution. The current [rapid-completion authority](rapid-completion.md) permits bounded integration through qualification. Missing implementations still cannot be replaced with green fixture results or relabelled as operator prerequisites.
 
 ## Earlier unit checkpoint
 
@@ -100,6 +109,6 @@ Gradle checks used Java 21, existing caches and `--offline`. Platform native tes
 
 Local unit logs: `/tmp/p0v3-implementation-{platform,acceptance}-final.log`, `/tmp/p0v3-implementation-{keykeeper,worklane,python}-units.log`. These are unit diagnostics, not native acceptance evidence.
 
-## Completion reporting
+## Current reporting reference
 
-Report source implementation and actual unit results separately from artifact production and runtime validation. The current implementation is **runtime-unverified; full-stack qualification remains 0/2**. No public activation or publication is authorized by this phase.
+Report source implementation and actual unit results separately from artifact production and runtime validation. Use [rapid completion](rapid-completion.md) for current checks, admission gaps and remaining capabilities. **Full-stack qualification remains 0/2**. Public production cutover and historical RSS publication are not authorized.

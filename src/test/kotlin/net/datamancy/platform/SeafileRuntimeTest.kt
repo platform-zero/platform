@@ -7,7 +7,7 @@ class SeafileRuntimeTest {
     private val inventory = AcquiredInventory(1, "candidate", listOf("seafile", "mariadb", "valkey").map {
         AcquiredImage(it, "upstream", "example.org/app:1", image, "b".repeat(64), emptyList(), image.substringAfter('@'), "amd64", "linux")
     })
-    @Test fun `recovery binds inputs and never replays schema or identity creation`() {
+    @Test fun `recovery binds inputs and never replays schema or identity creation`(): Unit {
         val base = java.nio.file.Files.createTempDirectory("p0v3-files-restore-")
         try {
             val source = SeafileRuntime.spec(inventory)
@@ -37,7 +37,32 @@ class SeafileRuntimeTest {
             assertFails { SeafileRecovery.prepare(inventory, recovered, "restored", base) }
         } finally { java.nio.file.Files.walk(base).use { it.sorted(Comparator.reverseOrder()).forEach(java.nio.file.Files::delete) } }
     }
-    @Test fun `native schema and identities are journalled without exposing bootstrap passwords to serving processes`() {
+    @Test fun `canonical shared SQL cache fragment uses only bounded native Seafile authorities`(): Unit {
+        val fresh = SeafileRuntime.canonicalFragment(inventory, "canonical-files")
+        assertEquals("seafile", fresh.product)
+        assertEquals(setOf("seafile-data", "seafile-web"), fresh.spec.networks.toSet())
+        assertEquals(setOf("seafile-web"), fresh.webNetworks)
+        assertEquals(setOf("mariadb", "valkey"), fresh.providerNetworks.keys)
+        assertEquals(setOf("seafile-state", "seafile-rpc"), fresh.spec.volumes.map { it.id }.toSet())
+        assertFalse(fresh.spec.processes.any { it.id in setOf("mariadb", "cache", "valkey", "caddy") })
+        assertEquals(setOf("ccnet_db", "seafile_db", "seahub_db"), fresh.spec.databaseAccess.map { it.database }.toSet())
+        assertTrue(fresh.spec.databaseAccess.filter { it.consumer == "seafile-schema-init" }
+            .all { it.principal == "seafile_migrate" && it.credentialFile == "seafile-migration.env" })
+        val cold = SeafileRuntime.coldRestoreFragment(fresh)
+        assertEquals(fresh.spec.volumes, cold.spec.volumes)
+        assertTrue(cold.spec.processes.none { it.oneShot })
+        assertEquals(fresh.spec.processes.filterNot { it.oneShot }.map { it.id }.toSet(),
+            cold.spec.processes.map { it.id }.toSet())
+        val ca = "-----BEGIN CERTIFICATE-----\nunit\n-----END CERTIFICATE-----\n"
+        val inputs = SeafileRuntime.canonicalInputs("1".repeat(64), "2".repeat(64), "3".repeat(64),
+            ca, pki = { mapOf("ca.pem" to ca, "web.pem" to "leaf", "web-key.pem" to "key") })
+        assertEquals(PrivateDeployment.inputNames(fresh.spec).toSet(), inputs.keys)
+        assertContains(inputs.getValue("seafile-schema.py"), "ssl_verify_identity=True")
+        assertFalse(inputs.getValue("seafile-app.env").contains("1".repeat(64)))
+        assertFalse(inputs.getValue("seafile-migration.env").contains("3".repeat(64)))
+        assertFails { SeafileRuntime.canonicalInputs("1".repeat(64), "1".repeat(64), "3".repeat(64), ca) }
+    }
+    @Test fun `native schema and identities are journalled without exposing bootstrap passwords to serving processes`(): Unit {
         val spec = SeafileRuntime.spec(inventory)
         assertEquals(8, PrivateDeployment.validate(spec).size)
         assertEquals(5, spec.processes.count { !it.oneShot })

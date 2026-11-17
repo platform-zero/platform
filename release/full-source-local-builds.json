@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "scope": "offline-source-provenance-only-not-runtime-inventory-or-native-admission",
+  "images": [
+    {
+      "artifact": "huly-elasticsearch-adapted",
+      "receipt": "p0v3-huly-search-build-6d582630bc3e",
+      "image": "localhost/p0v3-huly-elasticsearch@sha256:b07456315f9a55e5940a4da24e5d5a0ab6293f8c8cf0f6ae2c826f0b739ae133",
+      "imageId": "f033c63bad3eee3f7d3bc02066a0fbc4d69c527081a37889cc42485da9fa955c"
+    },
+    {
+      "artifact": "huly-kvs-adapted",
+      "receipt": "p0v3-huly-kvs-build-1f55c14434e9",
+      "image": "localhost/p0v3-huly-kvs@sha256:889f824034e49ce6b4666d3dcb343930e1b8b4f3bea3234cec9394bfef09d503",
+      "imageId": "3e9534dc7a9d41510464518422d15f8d0a88b5ee1d0c336f1a5e061388592aef"
+    },
+    {
+      "artifact": "huly-caddy-adapted",
+      "receipt": "p0v3-huly-caddy-build-1a587d36647d",
+      "image": "localhost/p0v3-huly-caddy@sha256:12aaf65164cae642f31c1434d19ff3fd83cea5bb2e03ecaf473308b594ef47b9",
+      "imageId": "dba10c44979358e71c0e6893e72b8788724ba663786d3c09c12e353b41d47776"
+    },
+    {
+      "artifact": "mailserver-adapted",
+      "receipt": "p0v3-mail-build-6f1e3d2ba6f0",
+      "image": "localhost/p0v3-mail-server@sha256:418138750a79ff8a41c33f6aa9bd3513c8986e4926423cbb9449ff34ba8ccad1",
+      "imageId": "403ca11f84a0233623d5055a905af47a2ab805823dda9c525eac16ac9cc56a1b"
+    },
+    {
+      "artifact": "mail-bootstrap-adapted",
+      "receipt": "p0v3-mail-build-6f1e3d2ba6f0",
+      "image": "localhost/p0v3-mail-bootstrap@sha256:4bf167ae8a50da33fd8981247deda2195cf3cb835ecddfbb0a983ce74d8cff9c",
+      "imageId": "2e5756b3310d047ff636e3c8bac4f50e2e64312309f3167cb93a181013374a41"
+    },
+    {
+      "artifact": "keykeeper-adapted",
+      "receipt": "p0v3-keykeeper-tls-build-5c893704f276",
+      "image": "localhost/p0v3-keykeeper@sha256:b8f1a1fca2877f5bae467fb7b70ca21ef6c014925ef728e333b9ca504b92904d",
+      "imageId": "29b7ef3937f29f039cc74038be1044ba44027d1341340f7c5d2ab02fefa41299"
+    }
+  ]
+}

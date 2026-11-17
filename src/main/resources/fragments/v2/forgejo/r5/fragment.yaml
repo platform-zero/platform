@@ -1,0 +1,160 @@
+schemaVersion: 2
+id: forgejo-postgres
+revision: 5
+product: forgejo
+artifacts: [forgejo, postgres-timescale]
+providers: [postgres]
+networks: [db-admin, forgejo-data, forgejo-web]
+providerNetworks:
+  postgres: [forgejo-data]
+webNetworks: [forgejo-web]
+volumes:
+  - {id: forgejo, userId: 1000}
+  - {id: forgejo-bootstrap, userId: 1000}
+inputs:
+  - name: forgejo-db-admin.env
+    owner: forgejo
+    purpose: BOOTSTRAP
+    consumers: [forgejo-db-init, forgejo-db-finalize]
+  - name: postgres-ca.pem
+    owner: postgres
+    purpose: RUNTIME
+    consumers: [forgejo-db-init, forgejo-migrate, forgejo-owner-init, forgejo-db-finalize, forgejo]
+  - name: forgejo-migration.env
+    owner: forgejo
+    purpose: BOOTSTRAP
+    consumers: [forgejo-migrate, forgejo-owner-init]
+  - name: forgejo-migration.ini
+    owner: forgejo
+    purpose: BOOTSTRAP
+    consumers: [forgejo-migrate, forgejo-owner-init]
+  - name: forgejo-runtime.env
+    owner: forgejo
+    purpose: RUNTIME
+    consumers: [forgejo]
+  - name: forgejo-runtime.ini
+    owner: forgejo
+    purpose: RUNTIME
+    consumers: [forgejo]
+templates:
+  - output: forgejo-migration.ini
+    resource: app.ini.template
+    format: INI
+    constants: {DATABASE_PRINCIPAL: forgejo_migrate}
+    parameters: {DATABASE_PASSWORD: HEX64, SECRET_KEY: HEX64, INTERNAL_TOKEN: HEX64, JWT_SECRET: BASE64URL_32}
+  - output: forgejo-runtime.ini
+    resource: app.ini.template
+    format: INI
+    constants: {DATABASE_PRINCIPAL: forgejo}
+    parameters: {DATABASE_PASSWORD: HEX64, SECRET_KEY: HEX64, INTERNAL_TOKEN: HEX64, JWT_SECRET: BASE64URL_32}
+processes:
+  - id: forgejo-db-init
+    artifact: postgres-timescale
+    userId: 999
+    oneShot: true
+    entrypoint: /bin/sh
+    networks: [db-admin]
+    environmentFile: forgejo-db-admin.env
+    files:
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+    command:
+      - -ec
+      - |
+        psql -X -v ON_ERROR_STOP=1 <<SQL
+        CREATE ROLE forgejo_migrate LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '$FORGEJO_MIGRATION_PASSWORD';
+        CREATE ROLE forgejo LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '$FORGEJO_RUNTIME_PASSWORD';
+        CREATE DATABASE forgejo OWNER postgres;
+        REVOKE ALL ON DATABASE forgejo FROM PUBLIC;
+        GRANT CONNECT ON DATABASE forgejo TO forgejo_migrate, forgejo;
+        SQL
+        psql -X -d forgejo -v ON_ERROR_STOP=1 <<'SQL'
+        REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+        GRANT USAGE, CREATE ON SCHEMA public TO forgejo_migrate;
+        SQL
+  - id: forgejo-migrate
+    artifact: forgejo
+    userId: 1000
+    oneShot: true
+    memoryMiB: 1024
+    entrypoint: /usr/local/bin/forgejo
+    command: [--work-path, /data, --config, /etc/forgejo/app.ini, migrate]
+    environmentFile: forgejo-migration.env
+    networks: [forgejo-data]
+    volumes:
+      - {volume: forgejo, target: /data}
+    files:
+      - {file: forgejo-migration.ini, target: /etc/forgejo/app.ini}
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+  - id: forgejo-owner-init
+    artifact: forgejo
+    userId: 1000
+    oneShot: true
+    memoryMiB: 1024
+    entrypoint: /bin/sh
+    environmentFile: forgejo-migration.env
+    networks: [forgejo-data]
+    volumes:
+      - {volume: forgejo, target: /data}
+      - {volume: forgejo-bootstrap, target: /bootstrap}
+    files:
+      - {file: forgejo-migration.ini, target: /etc/forgejo/app.ini}
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+    command:
+      - -ec
+      - |
+        umask 077
+        set -C
+        /usr/local/bin/forgejo --work-path /data --config /etc/forgejo/app.ini admin user create --username p0v3-bootstrap --random-password --random-password-length 64 --email bootstrap@localhost.invalid --admin --must-change-password=false > /bootstrap/owner.result
+        sync
+  - id: forgejo-db-finalize
+    artifact: postgres-timescale
+    userId: 999
+    oneShot: true
+    entrypoint: /bin/sh
+    networks: [db-admin]
+    environmentFile: forgejo-db-admin.env
+    files:
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+    command:
+      - -ec
+      - |
+        psql -X -d forgejo -v ON_ERROR_STOP=1 <<'SQL'
+        REVOKE CREATE ON SCHEMA public FROM forgejo_migrate;
+        GRANT USAGE ON SCHEMA public TO forgejo;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO forgejo;
+        GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO forgejo;
+        ALTER ROLE forgejo_migrate NOLOGIN;
+        SQL
+  - id: forgejo
+    artifact: forgejo
+    userId: 1000
+    memoryMiB: 1024
+    entrypoint: /usr/local/bin/forgejo
+    command: [--work-path, /data, --config, /etc/forgejo/app.ini, web]
+    environmentFile: forgejo-runtime.env
+    networks: [forgejo-data, forgejo-web]
+    volumes:
+      - {volume: forgejo, target: /data}
+    files:
+      - {file: forgejo-runtime.ini, target: /etc/forgejo/app.ini}
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+    readinessHttpPort: 3000
+    readinessHttpPath: /api/healthz
+install:
+  processes: [forgejo-db-init, forgejo-migrate, forgejo-owner-init, forgejo-db-finalize, forgejo]
+  dependencies:
+    forgejo-db-init: [postgres]
+    forgejo-migrate: [forgejo-db-init]
+    forgejo-owner-init: [forgejo-migrate]
+    forgejo-db-finalize: [forgejo-owner-init]
+    forgejo: [forgejo-db-finalize]
+  databaseAccess:
+    - {consumer: forgejo-migrate, provider: postgres, volume: postgres, database: forgejo, principal: forgejo_migrate, credentialFile: forgejo-migration.env, network: forgejo-data}
+    - {consumer: forgejo-owner-init, provider: postgres, volume: postgres, database: forgejo, principal: forgejo_migrate, credentialFile: forgejo-migration.env, network: forgejo-data}
+    - {consumer: forgejo, provider: postgres, volume: postgres, database: forgejo, principal: forgejo, credentialFile: forgejo-runtime.env, network: forgejo-data}
+restore:
+  processes: [forgejo]
+  dependencies:
+    forgejo: [postgres]
+  databaseAccess:
+    - {consumer: forgejo, provider: postgres, volume: postgres, database: forgejo, principal: forgejo, credentialFile: forgejo-runtime.env, network: forgejo-data}

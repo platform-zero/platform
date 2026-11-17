@@ -1,0 +1,36 @@
+schemaVersion: 2
+id: private-alloy
+revision: 1
+product: alloy
+artifacts: [alloy]
+providers: [loki]
+networks: [metrics-private]
+providerNetworks:
+  loki: [metrics-private]
+volumes:
+  - {id: alloy, userId: 65532}
+inputs:
+  - {name: config.alloy, owner: alloy, purpose: RUNTIME, consumers: [alloy]}
+templates:
+  - {output: config.alloy, resource: config.alloy, format: LITERAL, parameters: {}}
+processes:
+  - id: alloy
+    artifact: alloy
+    userId: 65532
+    memoryMiB: 256
+    networks: [metrics-private]
+    volumes:
+      - {volume: alloy, target: /var/lib/alloy}
+    files:
+      - {file: config.alloy, target: /etc/alloy/config.alloy}
+    command: [run, --storage.path=/var/lib/alloy, --server.http.listen-addr=0.0.0.0:12345, --disable-reporting, /etc/alloy/config.alloy]
+    readinessHttpPort: 12345
+    readinessHttpPath: /-/ready
+install:
+  processes: [alloy]
+  dependencies:
+    alloy: [loki]
+restore:
+  processes: [alloy]
+  dependencies:
+    alloy: [loki]

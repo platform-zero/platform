@@ -1,0 +1,25 @@
+schemaVersion: 2
+id: shared-memcached
+revision: 1
+product: memcached
+artifacts: [memcached]
+networks: [memcached-private]
+volumes: []
+inputs: []
+processes:
+  - id: memcached
+    artifact: memcached
+    userId: 11211
+    memoryMiB: 128
+    entrypoint: /usr/local/bin/memcached
+    command: [-m, '64', -U, '0', -l, 0.0.0.0]
+    networks: [memcached-private]
+    readiness: [/bin/sh, -ec, 'printf "version\r\nquit\r\n" | nc -w 2 127.0.0.1 11211 | grep -q "^VERSION "']
+install:
+  processes: [memcached]
+  dependencies:
+    memcached: []
+restore:
+  processes: [memcached]
+  dependencies:
+    memcached: []

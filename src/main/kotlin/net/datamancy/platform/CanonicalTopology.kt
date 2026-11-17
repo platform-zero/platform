@@ -41,19 +41,21 @@ internal object CanonicalTopology {
         // A bootstrap credential cannot become an ordinary daemon mount simply through composition.
         val bootstrapNames = setOf("postgres.env", "postgres-admin.env", "planka-bootstrap.env", "ntfy-bootstrap.env",
             "mariadb-bootstrap.env", "identity-db-admin.env", "identity-migration.env", "identity-realm.json",
-            "firefly-db-admin.env", "firefly-migration.env")
+            "firefly-db-admin.env", "firefly-migration.env", "planka-db-admin.env",
+            "planka-migration.env", "mariadb-bootstrap.env")
         require(inputs.none { it.input.substringAfter('/') in bootstrapNames && !it.bootstrapOnly }) {
             "Canonical daemon consumes bootstrap or migration authority"
         }
-        val missing = GenerationAssembly.requiredCapabilities - capabilities
+        val missing = plan.summary.missingCapabilities
         require(!requireComplete || missing.isEmpty()) { "Canonical capability closure is incomplete: ${missing.sorted().joinToString()}" }
         val networks = plan.specs.flatMap { spec -> spec.networks.map { network ->
             CanonicalNetwork("${spec.name}/$network", spec.processes.filter { network in it.networks }.map { "${spec.name}/${it.id}" }.sorted())
         } }
-        val capacity = GenerationCapacityPlanner.plan(plan.specs, plan.generation.diskReservationMiB).let {
-            if (plan.generation.rssPlan == null) it else it.copy(
-                steady = it.steady + GenerationResources(GenerationRssPlan.MEMORY_MIB, 0, 0),
-                install = it.install + GenerationResources(GenerationRssPlan.MEMORY_MIB, 0, 0))
+        val managedMemory = GenerationManagedComponents.memoryReservationMiB(plan.generation)
+        val capacity = GenerationCapacityPlanner.plan(plan.specs, plan.generation.diskReservationMiB, plan.generation.workingBudget).let { base ->
+            if (managedMemory == 0L) base else base.copy(
+                steady = base.steady + GenerationResources(managedMemory, 0, 0),
+                install = base.install + GenerationResources(managedMemory, 0, 0))
         }
         return CanonicalAssemblyPlan(plan, CanonicalTopologyReport(inventory.assemblySha256, providers, networks, inputs,
             inventory.databaseAccess, capacity,
@@ -65,7 +67,26 @@ internal object CanonicalTopology {
      * Routes are still explicit caller requests, checked against an exact approved host set.
      */
     fun ownership(compiled: CanonicalAssemblyPlan, site: String, routes: List<SiteRouteOwner>, approvedHosts: Set<String>): SiteOwnership {
-        require(approvedHosts.all { it.endsWith(".datamancy.net") && '*' !in it && it != "datamancy.net" }) {
+        if (CanonicalSharedYamlGraph.manifest().scope == "full-private" &&
+            compiled.assembly.summary.request.selections.any { it.recipe == CanonicalSharedYamlGraph.RECIPE })
+            require(routes == compiled.assembly.summary.request.portalRoutes) {
+                "Portal links and effective private route owners must be the same sealed cohort"
+            }
+        val fullRecipe = compiled.assembly.summary.request.selections.singleOrNull()?.recipe
+        if (fullRecipe in setOf(CanonicalSharedYamlGraph.R9_ASSEMBLY_RECIPE,
+                CanonicalSharedYamlGraph.R10_ASSEMBLY_RECIPE) || CanonicalSharedYamlGraph.manifest().revision == 9) {
+            val manifest = when (fullRecipe) {
+                CanonicalSharedYamlGraph.R9_ASSEMBLY_RECIPE -> PackagedGraphFragment.pendingV3R9().first
+                CanonicalSharedYamlGraph.R10_ASSEMBLY_RECIPE -> PackagedGraphFragment.pendingV3R10().first
+                else -> CanonicalSharedYamlGraph.manifest()
+            }
+            val expected = CanonicalGraphCaddyfile.siteRoutes(manifest,
+                compiled.assembly.specs.single { spec -> spec.processes.any { it.id == "caddy" } })
+            require(routes.sortedBy { it.host } == expected &&
+                approvedHosts == requireNotNull(manifest.integratedReference).modules.flatMap {
+                    it.privateRoutes.map(CanonicalIngressRoute::host)
+                }.toSet()) { "Full selected site authority must equal graph routes and every explicit private host" }
+        } else require(approvedHosts.all { it.endsWith(".datamancy.net") && '*' !in it && it != "datamancy.net" }) {
             "Canonical sites require exact approved datamancy.net hosts"
         }
         // Recompile instead of trusting a caller-constructed CanonicalAssemblyPlan/report.
@@ -91,7 +112,8 @@ internal object CanonicalTopology {
         val contract = SiteOwnership(site = site, assemblySha256 = graph.assemblySha256,
             processes = owners.map { SiteProcessOwner(it.key, it.value) },
             state = graph.state.map { state -> SiteStateOwner(state.volume, owners.getValue(state.writers.first()), groups.getValue(root(state.volume))) },
-            inputs = graph.inputs.map { SiteInputOwner(it.input, requireNotNull(it.compiledProduct), true, it.consumers) }, routes = routes)
+            inputs = graph.inputs.map { SiteInputOwner(it.input, requireNotNull(it.compiledProduct), true, it.consumers) },
+            routes = routes, managed = GenerationManagedComponents.ownership(compiled.assembly.generation))
         SiteOwnerships.check(compiled.assembly, contract, approvedHosts)
         return contract
     }

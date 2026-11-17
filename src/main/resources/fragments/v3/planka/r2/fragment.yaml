@@ -1,0 +1,147 @@
+schemaVersion: 2
+id: planka-postgres
+revision: 2
+product: planka
+artifacts: [postgres-timescale, planka]
+providers: [postgres]
+networks: [db-admin, planka-data, planka-web, planka-enrollment]
+providerNetworks:
+  postgres: [planka-data]
+webNetworks: [planka-web]
+volumes:
+  - {id: uploads, userId: 1000}
+inputs:
+  - name: planka-db-admin.env
+    owner: planka
+    purpose: BOOTSTRAP
+    consumers: [planka-db-init, planka-db-finalize]
+  - name: postgres-ca.pem
+    owner: postgres
+    purpose: RUNTIME
+    consumers: [planka-db-init, planka-init, planka-db-finalize, planka]
+  - name: planka-migration.env
+    owner: planka
+    purpose: BOOTSTRAP
+    consumers: [planka-init]
+  - name: planka-runtime.env
+    owner: planka
+    purpose: RUNTIME
+    consumers: [planka]
+  - name: planka-enrollment.env
+    owner: planka
+    purpose: BOOTSTRAP
+    consumers: [planka-enroll]
+  - name: planka-enroll.js
+    owner: planka
+    purpose: BOOTSTRAP
+    consumers: [planka-enroll]
+  - name: planka-database.js
+    owner: planka
+    purpose: RUNTIME
+    consumers: [planka-init, planka]
+  - name: fixture-terms.md
+    owner: planka
+    purpose: RUNTIME
+    consumers: [planka-init, planka]
+processes:
+  - id: planka-db-init
+    artifact: postgres-timescale
+    userId: 999
+    oneShot: true
+    entrypoint: /bin/sh
+    command:
+      - -ec
+      - |
+        psql -X -v ON_ERROR_STOP=1 <<SQL
+        CREATE ROLE planka_migrate LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '$PLANKA_MIGRATION_PASSWORD';
+        CREATE ROLE planka LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '$PLANKA_RUNTIME_PASSWORD';
+        CREATE DATABASE planka OWNER planka_migrate;
+        REVOKE ALL ON DATABASE planka FROM PUBLIC;
+        GRANT CONNECT ON DATABASE planka TO planka;
+        SQL
+    environmentFile: planka-db-admin.env
+    networks: [db-admin]
+    files:
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+  - id: planka-init
+    artifact: planka
+    userId: 1000
+    oneShot: true
+    memoryMiB: 1024
+    entrypoint: /usr/local/bin/node
+    command: [db/init.js]
+    environmentFile: planka-migration.env
+    networks: [planka-data]
+    volumes:
+      - {volume: uploads, target: /app/data}
+    files:
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+      - {file: planka-database.js, target: /app/config/local.js}
+      - {file: fixture-terms.md, target: /app/terms/custom/en-US.md}
+    tmpfs: [/tmp, /app/.tmp]
+  - id: planka-db-finalize
+    artifact: postgres-timescale
+    userId: 999
+    oneShot: true
+    entrypoint: /bin/sh
+    command:
+      - -ec
+      - |
+        psql -X -d planka -v ON_ERROR_STOP=1 <<'SQL'
+        REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+        GRANT USAGE ON SCHEMA public TO planka;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO planka;
+        GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO planka;
+        ALTER ROLE planka_migrate NOLOGIN;
+        SQL
+    environmentFile: planka-db-admin.env
+    networks: [db-admin]
+    files:
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+  - id: planka
+    artifact: planka
+    userId: 1000
+    memoryMiB: 1024
+    entrypoint: /usr/local/bin/node
+    command: [app.js, --prod]
+    environmentFile: planka-runtime.env
+    networks: [planka-data, planka-web, planka-enrollment]
+    volumes:
+      - {volume: uploads, target: /app/data}
+    files:
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+      - {file: planka-database.js, target: /app/config/local.js}
+      - {file: fixture-terms.md, target: /app/terms/custom/en-US.md}
+    tmpfs: [/tmp, /app/.tmp]
+    readinessHttpPort: 1337
+  - id: planka-enroll
+    artifact: planka
+    userId: 1000
+    oneShot: true
+    memoryMiB: 512
+    entrypoint: /usr/local/bin/node
+    command: [/run/secrets/planka-enroll.js]
+    environmentFile: planka-enrollment.env
+    networks: [planka-enrollment]
+    volumes:
+      - {volume: uploads, target: /app/data}
+    files:
+      - {file: planka-enroll.js, target: /run/secrets/planka-enroll.js}
+    tmpfs: [/tmp]
+install:
+  processes: [planka-db-init, planka-init, planka-db-finalize, planka, planka-enroll]
+  dependencies:
+    planka-db-init: [postgres]
+    planka-init: [planka-db-init]
+    planka-db-finalize: [planka-init]
+    planka: [planka-db-finalize]
+    planka-enroll: [planka]
+  databaseAccess:
+    - {consumer: planka-init, provider: postgres, volume: postgres, database: planka, principal: planka_migrate, credentialFile: planka-migration.env, network: planka-data}
+    - {consumer: planka, provider: postgres, volume: postgres, database: planka, principal: planka, credentialFile: planka-runtime.env, network: planka-data}
+restore:
+  processes: [planka]
+  dependencies:
+    planka: [postgres]
+  databaseAccess:
+    - {consumer: planka, provider: postgres, volume: postgres, database: planka, principal: planka, credentialFile: planka-runtime.env, network: planka-data}

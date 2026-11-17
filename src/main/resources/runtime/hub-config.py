@@ -8,6 +8,7 @@ import ssl
 import urllib.request
 from jupyterhub.auth import Authenticator
 from jupyterhub.spawner import Spawner
+from tornado.web import HTTPError
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -28,7 +29,9 @@ class FixtureAuthenticator(Authenticator):
 class FixedContainerSpawner(Spawner):
     def entry(self):
         if self.user.name not in self.assignments or self.name:
-            raise ValueError('No allocated notebook for this principal')
+            # Native user-visible quota denial, not an accidental 500 or a fallback
+            # spawn of a third notebook sharing somebody else's original home.
+            raise HTTPError(403, 'No allocated notebook for this principal')
         return self.assignments[self.user.name]
 
     async def request(self, action, method='GET'):

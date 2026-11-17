@@ -13,7 +13,10 @@ internal object OpenBaoRuntime {
                 environmentFile = "bao.env", files = listOf("bao.hcl", "ca.pem", "web.pem", "web-key.pem").map {
                     RuntimeFile(it, "/run/secrets/$it")
                 }, volumes = listOf(RuntimeMount("data", "/bao/data")), apparmorProfile = "p0v3-private-v1", memoryMiB = 1024,
-                readiness = listOf("/bin/sh", "-ec", "set +e; /usr/bin/bao status -format=json >/dev/null 2>&1; code=${'$'}?; test ${'$'}code -eq 0 || test ${'$'}code -eq 2"))
+                readiness = listOf("/bin/sh", "-ec", "set +e; status=${'$'}(/usr/bin/bao status -format=json 2>/dev/null); code=${'$'}?; " +
+                    "test ${'$'}code -eq 0 || test ${'$'}code -eq 2 || " +
+                    "{ test ${'$'}code -eq 1 && printf '%s' \"${'$'}status\" | grep -Eq '\"initialized\"[[:space:]]*:[[:space:]]*false' && " +
+                    "printf '%s' \"${'$'}status\" | grep -Eq '\"sealed\"[[:space:]]*:[[:space:]]*true'; }"))
         )).also { PrivateDeployment.validate(it) }
     }
     fun coldRestoreSpec(compiled: PrivateDeploymentSpec): PrivateDeploymentSpec {

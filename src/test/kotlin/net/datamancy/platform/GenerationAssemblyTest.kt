@@ -42,8 +42,13 @@ class GenerationAssemblyTest {
 
     @Test fun `all registered existing recipes resolve against repository artifact metadata without execution`() {
         val bytes = GenerationAssembly.readInventory(Path.of("release/downloaded-candidate-inventory.json"))
-        assertEquals(38, GenerationAssembly.catalog.size)
-        for (recipe in GenerationAssembly.catalog) {
+        val historical = GenerationAssembly.catalog.filter {
+            it.id !in FragmentRecipes.recipeIds && it.id != CanonicalSharedYamlGraph.RECIPE &&
+                it.id !in setOf(CanonicalSharedYamlGraph.R9_ASSEMBLY_RECIPE,
+                    CanonicalSharedYamlGraph.R10_ASSEMBLY_RECIPE) }
+        assertEquals(38, historical.size)
+        assertEquals(42, GenerationAssembly.catalog.size)
+        for (recipe in historical) {
             val plan = GenerationAssembly().plan(request.copy(inventorySha256 = ReleaseLocks.sha256(bytes),
                 selections = listOf(AssemblySelection(recipe.id)), diskReservationMiB = 131072), bytes)
             assertEquals(1, plan.specs.size)
@@ -54,6 +59,13 @@ class GenerationAssemblyTest {
             assertEquals(RuntimeStore.CANONICAL_V2, isolated.generation.store)
             assertNotEquals(plan.summary.members.single().specSha256, isolated.summary.members.single().specSha256)
         }
+    }
+
+    @Test fun `new Timescale recipe refuses the old artifact inventory rather than relabeling plain PostgreSQL`() {
+        val bytes = GenerationAssembly.readInventory(Path.of("release/downloaded-candidate-inventory.json"))
+        assertFails { GenerationAssembly().plan(request.copy(inventorySha256 = ReleaseLocks.sha256(bytes),
+            selections = listOf(AssemblySelection(FragmentRecipes.FORGEJO_POSTGRES)),
+            store = RuntimeStore.CANONICAL_V2, quadletControllerSha256 = "d".repeat(64)), bytes) }
     }
 
     @Test fun `duplicate proofs unsupported recipes cross-scope dependencies and weak policies are rejected`() {

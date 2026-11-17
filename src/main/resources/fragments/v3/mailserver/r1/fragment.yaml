@@ -1,0 +1,60 @@
+schemaVersion: 2
+id: private-native-mailserver
+revision: 1
+product: mailserver
+artifacts: [mailserver-adapted, mail-bootstrap-adapted]
+networks: [mail-data]
+exportedInputs: [mail-ca.pem]
+volumes:
+  - {id: mail-store, userId: 2000}
+inputs:
+  - {name: mail-bootstrap.py, owner: mailserver, purpose: BOOTSTRAP, consumers: [mail-init]}
+  - {name: mail-seed.json, owner: mailserver, purpose: BOOTSTRAP, consumers: [mail-init]}
+  - {name: mail-users.json, owner: mailserver, purpose: BOOTSTRAP, consumers: [mail-init]}
+  - {name: mail-generation, owner: mailserver, purpose: RUNTIME, consumers: [mail-init, mail]}
+  - {name: mail-store.json, owner: mailserver, purpose: RUNTIME, consumers: [mail-init, mail]}
+  - {name: mail-bootstrap.env, owner: mailserver, purpose: BOOTSTRAP, consumers: [mail-init]}
+  - {name: mail.env, owner: mailserver, purpose: RUNTIME, consumers: [mail]}
+  - {name: mail-ca.pem, owner: mailserver, purpose: RUNTIME, consumers: [mail]}
+processes:
+  - id: mail-init
+    artifact: mail-bootstrap-adapted
+    userId: 2000
+    memoryMiB: 2048
+    oneShot: true
+    networks: [mail-data]
+    entrypoint: /usr/bin/python3
+    command: [/run/secrets/mail-bootstrap.py]
+    environmentFile: mail-bootstrap.env
+    volumes:
+      - {volume: mail-store, target: /data}
+    files:
+      - {file: mail-bootstrap.py, target: /run/secrets/mail-bootstrap.py}
+      - {file: mail-seed.json, target: /run/secrets/mail-seed.json}
+      - {file: mail-users.json, target: /run/secrets/users.json}
+      - {file: mail-generation, target: /run/secrets/generation}
+      - {file: mail-store.json, target: /run/secrets/mail-store.json}
+  - id: mail
+    artifact: mailserver-adapted
+    userId: 2000
+    memoryMiB: 2048
+    networks: [mail-data]
+    entrypoint: /bin/sh
+    command: [-ec, 'test -s /data/store/CURRENT; cmp /data/ready /run/secrets/generation; exec /usr/local/bin/stalwart --config /run/secrets/mail-store.json']
+    environmentFile: mail.env
+    files:
+      - {file: mail-store.json, target: /run/secrets/mail-store.json}
+      - {file: mail-generation, target: /run/secrets/generation}
+      - {file: mail-ca.pem, target: /run/secrets/ca.pem}
+    volumes:
+      - {volume: mail-store, target: /data}
+    readiness: [/usr/bin/curl, --fail, --silent, --max-time, '5', --cacert, /run/secrets/ca.pem, 'https://mail:8443/healthz/live']
+install:
+  processes: [mail-init, mail]
+  dependencies:
+    mail-init: []
+    mail: [mail-init]
+restore:
+  processes: [mail]
+  dependencies:
+    mail: []

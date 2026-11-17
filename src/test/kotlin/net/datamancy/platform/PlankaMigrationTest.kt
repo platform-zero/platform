@@ -32,7 +32,7 @@ class PlankaMigrationTest {
             migrationEnvironment = pin(root, "migration.env", "DATABASE_URL=postgresql://planka_migrate:synthetic@postgres:5432/planka?sslmode=verify-full\n".toByteArray()),
             image = ActivationImagePin(image.image, image.imageId), fenceId = "11111111-1111-1111-1111-111111111111")
     }
-    @Test fun `migration runs only Knex no bootstrap and retires scoped principal`() = temporary { root ->
+    @Test fun `migration runs only Knex no bootstrap and retires scoped principal`(): Unit = temporary { root ->
         val req = request(root); val calls = mutableListOf<List<String>>(); var observed = 0
         val migration = PlankaMigration(root, RuntimeCommands { args ->
             calls += args; RuntimeCommandResult(0, if (args.last().startsWith("SELECT")) "f\n" else "")
@@ -47,7 +47,7 @@ class PlankaMigrationTest {
         assertTrue(calls[calls.lastIndex - 1].last().contains("NOLOGIN"))
         assertFails { migration.migrate(req) }; assertEquals(4, calls.size)
     }
-    @Test fun `migration failures retain original pending identity and revoke role`() {
+    @Test fun `migration failures retain original pending identity and revoke role`(): Unit {
         for (failure in listOf("run", "interrupt", "retire", "interrupt-retire", "interrupt-flag")) temporary { root ->
             val req = request(root); val calls = mutableListOf<List<String>>()
             val migration = PlankaMigration(root, RuntimeCommands { args ->
@@ -70,7 +70,34 @@ class PlankaMigrationTest {
             } finally { Thread.interrupted() }
         }
     }
-    @Test fun `unsupported versions image substitution and input tampering have no effects`() = temporary { root ->
+    @Test fun `original migration input is reduced to scoped URL without bootstrap administrator or replay`() : Unit = temporary { root ->
+        val name = "q-111111111111-core"
+        val spec = CanonicalCoreRuntime.spec(inventory, name).copy(store = RuntimeStore.CANONICAL_V2)
+        val inputs = root.resolve(name)
+        Files.createDirectory(inputs, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+        val url = "postgresql://planka_migrate:${"d".repeat(64)}@postgres:5432/planka?sslmode=verify-full"
+        val original = "DATABASE_URL=$url\nNODE_EXTRA_CA_CERTS=/run/secrets/postgres-ca.pem\n" +
+            "DEFAULT_ADMIN_PASSWORD=${"e".repeat(64)}\n"
+        val boot = pin(inputs, "planka-bootstrap.env", original.toByteArray())
+        val ca = pin(inputs, "postgres-ca.pem", "-----BEGIN CERTIFICATE-----\nprivate-unit\n-----END CERTIFICATE-----\n".toByteArray())
+        val member = GenerationMember(name)
+        val pin = GenerationPin(member, "a".repeat(64), mapOf("planka-bootstrap.env" to boot.sha256,
+            "postgres-ca.pem" to ca.sha256), "b".repeat(64), spec)
+        val bundle = GenerationBundle(GenerationRequest(id = "q-111111111111", candidateSha256 = "c".repeat(64),
+            members = listOf(member), diskReservationMiB = 8192, store = RuntimeStore.CANONICAL_V2),
+            listOf(pin), 4096, "d".repeat(64))
+        val out = PlankaMigration.prepareEnvironment(bundle, root, root.resolve("migration.env"))
+        assertEquals("DATABASE_URL=$url\nNODE_EXTRA_CA_CERTS=/run/secrets/postgres-ca.pem\n",
+            ReleasePrivateFiles.read(Path.of(out.path)).decodeToString())
+        assertFalse(ReleasePrivateFiles.read(Path.of(out.path)).decodeToString().contains("DEFAULT_ADMIN"))
+        assertFails { PlankaMigration.prepareEnvironment(bundle, root, root.resolve("migration.env")) }
+        val changed = bundle.copy(members = listOf(pin.copy(inputHashes = pin.inputHashes +
+            ("planka-bootstrap.env" to "0".repeat(64)))))
+        assertFails { PlankaMigration.prepareEnvironment(changed, root, root.resolve("other.env")) }
+        assertFalse(Files.exists(root.resolve("other.env")))
+    }
+
+    @Test fun `unsupported versions image substitution and input tampering have no effects`(): Unit = temporary { root ->
         val req = request(root); var calls = 0
         val migration = PlankaMigration(root, RuntimeCommands { calls++; error("must not execute") }) { _, _ -> }
         for (invalid in listOf(req.copy(transition = PlankaVersionTransition("2.1.0", "2.2.1")),
@@ -85,7 +112,7 @@ class PlankaMigrationTest {
         assertFails { PlankaMigration.requireRollbackSafe(Phase.ACCEPTED, "2.2.1", "2.2.0") }
         PlankaMigration.requireRollbackSafe(Phase.ACCEPTED, "2.2.1", "2.2.1")
     }
-    @Test fun `cold restored standalone app cannot recreate administrator or lose provider order`() {
+    @Test fun `cold restored standalone app cannot recreate administrator or lose provider order`(): Unit {
         val spec = PlankaRuntime.spec(inventory)
         val restored = PlankaRuntime.coldRestoreSpec(spec)
         assertEquals(setOf("postgres", "planka"), restored.processes.map { it.id }.toSet())

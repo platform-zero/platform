@@ -1,6 +1,8 @@
 package net.datamancy.platform
 
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermissions
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.test.*
@@ -42,12 +44,15 @@ class OwnedReleaseUpdateTest {
             image = "example.test/kopia@sha256:" + "9".repeat(64), imageId = "8".repeat(64))
         return Fixture(source, bytes, nextBytes, intent, receipt)
     }
-    @Test fun `owned patch update preserves state credentials site scope and retires every initializer`() {
+    @Test fun `owned patch update preserves state credentials site scope and retires every initializer`() : Unit {
         val f = fixture()
+        assertEquals("ghcr.io/plankanban/planka:2.2.0", OwnedReleaseUpdates.preflight(f.old, f.next, f.intent)
+            .first.images.single { it.product == "planka" }.reference)
         val target = OwnedReleaseUpdates.compile(f.source, f.old, f.next, f.intent, f.receipt)
         assertEquals(f.intent.targetGeneration, target.request.id); assertEquals(f.intent.candidateSha256, target.request.candidateSha256)
         assertEquals(OwnedUpdateLineage(intent = f.intent, snapshot = f.receipt, original = f.source), target.ownedUpdate)
         assertNull(target.recoverySourceKopia); assertNull(target.recoverySourceArchiveSha256)
+        assertNull(target.request.recoveredRssPlan); assertNull(target.request.recoveryStateReservationMiB)
         assertTrue(target.members.all { member -> member.spec.processes.none { it.oneShot } })
         assertEquals(target.request.diskReservationMiB, target.ownership!!.assembly.request.diskReservationMiB)
         assertTrue(target.request.diskReservationMiB > f.source.request.diskReservationMiB,
@@ -69,7 +74,119 @@ class OwnedReleaseUpdateTest {
         assertFails { OwnedReleaseUpdates.validate(target.copy(recoverySourceKopia = f.receipt)) }
         assertFails { OwnedReleaseUpdates.compile(target, f.old, f.next, f.intent, f.receipt) }
     }
-    @Test fun `initializer retirement requires exact original evidence and never weakens fresh ownership`() {
+    @Test fun `native no-target namespace census refuses any real candidate resource or prepared member`(): Unit {
+        val f = fixture()
+        val root = Files.createTempDirectory("no-target-native-unit-")
+        try {
+            val target = f.intent.targetGeneration
+            val empty = RuntimeCommands { RuntimeCommandResult(0, "") }
+            val proven = PrivateDeployment.observeAbsentOwnedTarget(f.source, f.intent.source.bundleSha256,
+                target, empty, root)
+            assertEquals(target, proven.targetGeneration)
+            assertEquals(setOf("container", "network", "volume", "secret"), proven.podmanInventorySha256.keys)
+            val member = proven.targetMembers.single()
+            RecoveryDeadline.within {
+                PrivateDeployment.withOrderedNativeLocks(listOf(member, f.source.members.single().spec.name), root) {
+                    assertEquals(member, PrivateDeployment.observeAbsentOwnedTarget(f.source,
+                        f.intent.source.bundleSha256, target, empty, root).targetMembers.single(),
+                        "An isolated target may contain only its lock, not a prepared writer")
+                }
+            }
+            assertFails {
+                RecoveryDeadline.within {
+                    PrivateDeployment.withOrderedNativeLocks(listOf(member), root) {
+                        val lock = root.resolve(member).resolve("runtime.lock")
+                        Files.delete(lock)
+                        Files.writeString(lock, "forged replacement")
+                        Files.setPosixFilePermissions(lock, PosixFilePermissions.fromString("rw-------"))
+                    }
+                }
+            }
+            val foreign = RuntimeCommands { argv -> RuntimeCommandResult(0,
+                if (argv.first() == "container") "p0v3-live-$member-planka\n" else "") }
+            assertFails { PrivateDeployment.observeAbsentOwnedTarget(f.source,
+                f.intent.source.bundleSha256, target, foreign, root) }
+            val directory = root.resolve(member)
+            Files.writeString(directory.resolve("manifest.json"), "unknown native preparation")
+            assertFails { PrivateDeployment.observeAbsentOwnedTarget(f.source,
+                f.intent.source.bundleSha256, target, empty, root) }
+        } finally { Files.walk(root).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
+    }
+    @Test fun `owned candidate functional restore projects original data into private unowned namespace`(): Unit {
+        val f = fixture()
+        val owned = OwnedReleaseUpdates.compile(f.source, f.old, f.next, f.intent, f.receipt)
+        val restored = FoundationRestore.bundle(owned, json.decodeFromString(f.next.decodeToString()),
+            "q-333333333333", "f".repeat(64), ColdRestoreCohort.WHOLE_RELEASE, RuntimeStore.CANONICAL_V2)
+        assertEquals("q-333333333333", restored.request.id)
+        assertEquals("f".repeat(64), restored.recoverySourceArchiveSha256)
+        assertNull(restored.ownedUpdate); assertNull(restored.ownership)
+        assertNull(restored.recoverySourceKopia)
+        assertEquals(owned.members.single().spec.volumes, restored.members.single().spec.volumes)
+        assertTrue(restored.members.all { it.spec.ingress == null && it.spec.nativeIngress == null &&
+            it.spec.processes.none(RuntimeProcess::oneShot) })
+        assertTrue(restored.members.single().inputHashes.all { (input, digest) ->
+            owned.members.single().inputHashes[input] == digest
+        }, "Private cold projection retains only original authenticated daemon inputs")
+        assertEquals(owned.members.single().spec.processes.single { it.id == "planka" }.imageId,
+            restored.members.single().spec.processes.single { it.id == "planka" }.imageId)
+        assertFails { SiteOwnerships.checkSealed(restored.copy(ownership = owned.ownership)) }
+    }
+    @Test fun `owned functional restore refuses forged lineage instead of treating it as ordinary recovered owner`(): Unit {
+        val f = fixture()
+        val owned = OwnedReleaseUpdates.compile(f.source, f.old, f.next, f.intent, f.receipt)
+        val candidate = json.decodeFromString<AcquiredInventory>(f.next.decodeToString())
+        val restore: (GenerationBundle) -> GenerationBundle = { source ->
+            FoundationRestore.bundle(source, candidate, "q-333333333333", "f".repeat(64),
+                ColdRestoreCohort.WHOLE_RELEASE, RuntimeStore.CANONICAL_V2)
+        }
+        val lineage = requireNotNull(owned.ownedUpdate)
+        assertFails { restore(owned.copy(ownedUpdate = lineage.copy(original = null))) }
+        assertFails { restore(owned.copy(ownedUpdate = lineage.copy(
+            original = f.source.copy(memoryReservationMiB = f.source.memoryReservationMiB + 1)))) }
+        assertFails { restore(owned.copy(ownedUpdate = lineage.copy(snapshot = f.receipt.copy(
+            generation = "q-999999999999")))) }
+        assertFails { restore(owned.copy(ownership = owned.ownership!!.copy(
+            contract = owned.ownership.contract.copy(site = "foreign")))) }
+        assertFails { FoundationRestore.bundle(owned, candidate, owned.request.id, "f".repeat(64),
+            ColdRestoreCohort.WHOLE_RELEASE, RuntimeStore.CANONICAL_V2) }
+        assertFails { FoundationRestore.bundle(owned, candidate, "q-333333333333", "f".repeat(64),
+            ColdRestoreCohort.FOUNDATION, RuntimeStore.CANONICAL_V2) }
+    }
+    @Test fun `owned update seals original RSS definition instead of inheriting inert cold authority`(): Unit {
+        val original = fixture().source.request
+        val plan = GenerationRssPlan(controllerSha256 = "a".repeat(64),
+            artifactClosure = ActivationInput("/mnt/media/p0-v3/rss/closure.json", "b".repeat(64)),
+            mastodonOrigin = "https://social.datamancy.net")
+        val active = original.copy(rssPlan = plan)
+        val cold = active.copy(id = "q-222222222222", rssPlan = null, recoveredRssPlan = plan,
+            recoveryStateReservationMiB = original.diskReservationMiB,
+            diskReservationMiB = original.diskReservationMiB * 3 + 512)
+        val owned = OwnedReleaseUpdates.ownedRssProjection(active, cold)
+        assertEquals(plan, owned.rssPlan)
+        assertNull(owned.recoveredRssPlan)
+        assertNull(owned.recoveryStateReservationMiB)
+        assertEquals(cold.diskReservationMiB, owned.diskReservationMiB)
+        assertFails { OwnedReleaseUpdates.ownedRssProjection(active.copy(recoveredRssPlan = plan), cold) }
+        assertFails { OwnedReleaseUpdates.ownedRssProjection(active, cold.copy(rssPlan = plan)) }
+        assertFails { OwnedReleaseUpdates.ownedRssProjection(active, cold.copy(recoveredRssPlan = null)) }
+    }
+    @Test fun `owned reference terminal distinguishes rollback completion from committed site transfer`(): Unit {
+        val f = fixture()
+        val root = Path.of("/mnt/media/p0-v3/release-transactions")
+        val generations = Path.of("/mnt/media/p0-v3/release-generations")
+        val base = OwnedUpdateReferenceTerminal(kind = "rollback", transactionId = "owned-trial",
+            intentSha256 = "a".repeat(64), original = f.receipt, source = f.intent.source,
+            targetGeneration = f.intent.targetGeneration, targetBundleSha256 = "b".repeat(64),
+            sitePolicySha256 = f.intent.sitePolicySha256, importResult = ActivationInput(
+                generations.resolve(f.intent.targetGeneration).resolve("stage.result.json").toString(), "c".repeat(64)))
+        assertFails { base.validate(root, generations) } // Cannot retire on an import result callback.
+        assertFails { base.copy(kind = "activation", activeSite = ActivationInput(
+            root.resolve("active-sites/unit/fake.completed.json").toString(), "d".repeat(64)))
+            .validate(root, generations) } // No target adoption/held original/second functional snapshot.
+        assertFails { base.copy(kind = "qualification", qualifiedSnapshot = f.receipt)
+            .validate(root, generations) } // No distinct candidate qualification snapshot.
+    }
+    @Test fun `initializer retirement requires exact original evidence and never weakens fresh ownership`() : Unit {
         val f = fixture()
         val target = OwnedReleaseUpdates.compile(f.source, f.old, f.next, f.intent, f.receipt)
         val lineage = requireNotNull(target.ownedUpdate)
@@ -99,7 +216,7 @@ class OwnedReleaseUpdateTest {
         assertFails { SiteOwnerships.checkSealed(changed) }
     }
 
-    @Test fun `wrong snapshot tampered inventories unsupported versions and recovery promotion are rejected`() {
+    @Test fun `wrong snapshot tampered inventories unsupported versions and recovery promotion are rejected`() : Unit {
         val f = fixture()
         for (bad in listOf(f.intent.copy(targetGeneration = f.intent.source.id), f.intent.copy(previousInventorySha256 = "0".repeat(64)),
             f.intent.copy(transition = PlankaVersionTransition("2.2.1", "2.2.0")))) {
@@ -113,5 +230,8 @@ class OwnedReleaseUpdateTest {
         })).toByteArray()
         assertFails { OwnedReleaseUpdates.compile(f.source, f.old, changedProvider,
             f.intent.copy(candidateInventorySha256 = ReleaseLocks.sha256(changedProvider)), f.receipt) }
+        assertFails { OwnedReleaseUpdates.preflight(f.old, changedProvider,
+            f.intent.copy(candidateInventorySha256 = ReleaseLocks.sha256(changedProvider))) }
+        assertFails { OwnedReleaseUpdates.preflight(f.old, f.next, f.intent.copy(previousInventorySha256 = "0".repeat(64))) }
     }
 }

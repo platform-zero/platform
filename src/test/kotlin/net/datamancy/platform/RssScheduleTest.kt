@@ -43,7 +43,7 @@ class RssScheduleTest {
         val units = schedule.units(root, hash)
         assertEquals(2, units.size)
         assertTrue(units.values.any { "rss schedule-tick $root $hash" in it && "User=${binding.userId}" in it })
-        assertTrue(units.values.any { "OnUnitInactiveSec=900s" in it })
+        assertTrue(units.values.any { "OnUnitActiveSec=900s" in it })
         schedule.release(root, hash); assertEquals(1, checks)
         // Current manifest still prevents publication even if a synthetic unit authority allows it.
         assertFails { schedule.tick(root, hash) }
@@ -51,6 +51,35 @@ class RssScheduleTest {
         assertNull(schedule.tick(root, hash)); assertFails { schedule.release(root, hash) }
         assertEquals(before, state.read())
         assertFails { schedule.units(root, "b".repeat(64)) }
+    }
+    @Test fun `read only original bootstrap authority cannot enroll enable or revive a retired timer`() = fixture { parent, binding ->
+        var sourceRunning = true; var originalChecks = 0; var fetches = 0
+        val schedule = RssSchedule({ _, committed ->
+            require(committed && sourceRunning) { "Bootstrap cannot substitute for activation-start or a stopped original" }
+            originalChecks++
+        }, {}, RssHttp { method, _, _, _ ->
+            assertEquals("GET", method); fetches++
+            RssHttpReply(200, "<rss><channel/></rss>".toByteArray())
+        }, { 1000 }, { true })
+        val root = parent.resolve("schedule"); val hash = schedule.enroll(root, binding)
+        assertNull(schedule.tick(root, hash))
+        assertEquals(0, originalChecks); assertEquals(0, fetches)
+        assertFails { schedule.release(root, hash) } // Branch cannot mint a missing consumption permit.
+        assertFalse(Files.exists(root.resolve("enabled")))
+        // A pre-existing original schedule is the ONLY path that may read the signed source.
+        save(root.resolve("enabled"), hash)
+        val before = RssStateStore(Path.of(binding.stateDirectory)).read()
+        assertNotNull(schedule.tick(root, hash))
+        assertTrue(originalChecks > 0)
+        assertTrue(fetches > 0)
+        assertEquals(before.pending, RssStateStore(Path.of(binding.stateDirectory)).read().pending)
+        sourceRunning = false; val previousFetches = fetches
+        assertFails { schedule.tick(root, hash) }
+        assertEquals(previousFetches, fetches)
+        schedule.pause(root, hash)
+        assertNull(schedule.tick(root, hash))
+        assertFails { schedule.release(root, hash) }
+        assertTrue(Files.exists(root.resolve("suspended")))
     }
     @Test fun `maintenance interruption survives lock release and blocks publication activation and new IDs`() = fixture { parent, binding ->
         var authorities = 0
@@ -184,7 +213,7 @@ class RssScheduleTest {
         assertTrue(command("rss", "schedule-enroll", root.toString(), input.toString()))
         val hash = output.last()
         assertTrue(command("rss", "schedule-units", root.toString(), hash))
-        assertTrue(output.last().contains("OnUnitInactiveSec"))
+        assertTrue(output.last().contains("OnUnitActiveSec"))
         assertTrue(command("rss", "schedule-tick", root.toString(), hash)); assertEquals("disabled", output.last())
         assertTrue(command("rss", "schedule-pause", root.toString(), hash)); assertEquals("suspended", output.last())
         assertFails { command("rss", "schedule-pause") }
@@ -239,16 +268,29 @@ class RssScheduleTest {
         save(consumptionRoot.resolve("${binding.deployment.generationId}.consumed.json"), buildJsonObject {
             put("permit", permit); put("consumption", consumption); put("claimJournal", claimText)
         }.toString())
-        var live = true; var observed = 0
-        val authority = RssActivationAuthority(consumptionRoot) { deployment, actualCandidate, images ->
+        var live = true; var observed = 0; var current = true; var siteChecks = 0
+        val authority = RssActivationAuthority(consumptionRoot, requireCurrentSite = { actual, path ->
+            siteChecks++
+            require(current) { "Synthetic superseded site" }
+            assertEquals(binding, actual)
+            assertEquals(journal, path)
+            assertEquals(Phase.COMMITTED, TransactionJournal.verify(path).last().phase)
+        }) { deployment, actualCandidate, images ->
             observed++; require(live); assertEquals(binding.deployment, deployment); assertEquals(candidate, actualCandidate)
             assertEquals(setOf("example.org/unit@sha256:$hex" to hex), images)
             listOf(CaddyUpstream("social.datamancy.net", "unit:3000"))
         }
         authority.verify(binding, false); assertEquals(1, observed)
+        assertEquals(0, siteChecks)
         assertFails { authority.verify(binding, true) }
+        assertEquals(0, siteChecks)
         TransactionJournal.appendExisting(journal, Phase.COMMITTED, accepted.snapshotId, claim.hash)
         authority.verify(binding, true)
+        assertEquals(1, siteChecks)
+        current = false
+        assertFailsWith<IllegalArgumentException> { authority.verify(binding, true) }
+        assertEquals(2, siteChecks)
+        current = true
         assertFails { authority.verify(binding, false) }
         assertFails { authority.verify(binding.copy(mastodonOrigin = "https://other.datamancy.net"), true) }
         live = false; assertFails { authority.verify(binding, true) }; live = true

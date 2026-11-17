@@ -1,0 +1,49 @@
+APP_NAME = Platform Zero private Forgejo
+RUN_USER = git
+RUN_MODE = prod
+WORK_PATH = /data
+[database]
+DB_TYPE = postgres
+HOST = postgres:5432
+NAME = forgejo
+USER = {{DATABASE_PRINCIPAL}}
+PASSWD = {{DATABASE_PASSWORD}}
+SSL_MODE = verify-full
+[repository]
+ROOT = /data/repositories
+DEFAULT_PRIVATE = private
+[server]
+APP_DATA_PATH = /data/app
+HTTP_ADDR = 0.0.0.0
+HTTP_PORT = 3000
+ROOT_URL = https://git.datamancy.net/
+DISABLE_SSH = true
+LFS_START_SERVER = false
+[security]
+INSTALL_LOCK = true
+SECRET_KEY = {{SECRET_KEY}}
+INTERNAL_TOKEN = {{INTERNAL_TOKEN}}
+[oauth2]
+JWT_SIGNING_ALGORITHM = HS256
+JWT_SECRET = {{JWT_SECRET}}
+[service]
+DISABLE_REGISTRATION = true
+REQUIRE_SIGNIN_VIEW = true
+ENABLE_NOTIFY_MAIL = false
+[mailer]
+ENABLED = false
+[federation]
+ENABLED = false
+[actions]
+# Source-only: never activate until one registered rootless native worker audits
+# every effective image, repository, commit, mount and network before job create.
+ENABLED = true
+DEFAULT_ACTIONS_URL = self
+[cron.update_checker]
+ENABLED = false
+[session]
+PROVIDER = file
+PROVIDER_CONFIG = /data/sessions
+[log]
+MODE = console
+LEVEL = Warn

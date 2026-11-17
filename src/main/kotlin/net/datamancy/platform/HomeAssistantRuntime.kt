@@ -34,8 +34,45 @@ internal object HomeAssistantRuntime {
             .also { PrivateDeployment.validate(it) }
     }
 
+    /** Keep the historical recipe bytes and initializer unchanged; prefix only canonical input names. */
+    fun canonicalFragment(inventory: AcquiredInventory, name: String): CanonicalProviderFragment {
+        val original = spec(inventory, name)
+        val fragment = original.copy(store = RuntimeStore.CANONICAL_V2,
+            networks = listOf("home-data", "home-web"), processes = original.processes.map { process ->
+                process.copy(id = if (process.id == "config-init") "homeassistant-config-init" else process.id,
+                    dependencies = process.dependencies.map { if (it == "config-init") "homeassistant-config-init" else it },
+                    files = process.files.map { it.copy(file = "homeassistant-${it.file}") },
+                    environmentFile = process.environmentFile?.let { "homeassistant-$it" },
+                    networks = if (process.oneShot) listOf("home-data") else listOf("home-data", "home-web"))
+            })
+        PrivateDeployment.validate(fragment)
+        return CanonicalProviderFragment("homeassistant", fragment, webNetworks = setOf("home-web"))
+    }
+    fun canonicalInputs(): Map<String, String> = inputs().mapKeys { (key, _) -> "homeassistant-$key" }
+        .mapValues { (key, value) -> if (key == "homeassistant-configuration.yaml") {
+            require("frontend:\n" in value)
+            value.replace("frontend:\n", "frontend:\npersistent_notification:\n")
+        } else value }
+    fun coldRestoreFragment(fresh: CanonicalProviderFragment): CanonicalProviderFragment {
+        require(fresh.product == "homeassistant" && fresh.spec.store == RuntimeStore.CANONICAL_V2 &&
+            fresh.spec.processes.filter { it.oneShot }.map { it.id } == listOf("homeassistant-config-init") &&
+            fresh.spec.volumes.single().id == "config")
+        val original = fresh.spec.processes.single { !it.oneShot }
+        require(original.id == "homeassistant" && original.entrypoint == "/usr/local/bin/python3" &&
+            original.command == listOf("-m", "homeassistant", "--config", "/config") &&
+            original.image == "ghcr.io/home-assistant/home-assistant@sha256:21935614df6d9f24f680a1ef749f0570d2d6b7936c606c0a44253ae875865c04")
+        val guard = requireNotNull(javaClass.getResourceAsStream("/runtime/homeassistant-recovery-guard.py"))
+            .bufferedReader().use { it.readText() }
+        val cold = fresh.spec.copy(processes = listOf(original.copy(dependencies = emptyList(),
+            environmentFile = null, command = listOf("-c", guard))))
+        PrivateDeployment.validate(cold)
+        return fresh.copy(spec = cold)
+    }
+
     fun prepare(inventory: AcquiredInventory, base: Path = PrivateDeployment.BASE, name: String = "homeassistant", store: RuntimeStore = RuntimeStore.LEGACY): Path =
-        RuntimePreparation.prepare(spec(inventory, name).copy(store = store), base) {
+        RuntimePreparation.prepare(spec(inventory, name).copy(store = store), base) { inputs() }
+
+    fun inputs(): Map<String, String> =
             mapOf("homeassistant.env" to "HOME=/config\nP0V3_FIXTURE_PASSWORD=${RuntimePreparation.password()}\n",
                 "configuration.yaml" to """
                     homeassistant:
@@ -70,5 +107,4 @@ internal object HomeAssistantRuntime {
                             target:
                               entity_id: input_boolean.private_result
                 """.trimIndent() + "\n")
-        }
 }

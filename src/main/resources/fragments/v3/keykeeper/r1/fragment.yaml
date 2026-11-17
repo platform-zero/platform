@@ -1,0 +1,74 @@
+schemaVersion: 2
+id: private-keykeeper-bao-oidc
+revision: 1
+product: keykeeper
+artifacts: [keykeeper-adapted]
+providers: [keycloak, openbao, caddy]
+providerProcesses:
+  keycloak: [keycloak]
+  openbao: [bao]
+  caddy: [caddy]
+networks: [identity-web, bao-web, keeper-web, ingress-control]
+providerNetworks:
+  keycloak: [identity-web]
+  openbao: [bao-web]
+  caddy: [ingress-control]
+webNetworks: [keeper-web]
+exportedInputs: [keeper-ca.pem]
+volumes:
+  - {id: keeper-trust, userId: 65532}
+inputs:
+  - {name: identity-ca.pem, owner: keycloak, purpose: RUNTIME, consumers: [keeper-trust-init]}
+  - {name: bao-ca.pem, owner: openbao, purpose: RUNTIME, consumers: [keeper-trust-init]}
+  - {name: keeper-ca.pem, owner: keykeeper, purpose: RUNTIME, consumers: [keeper-trust-init, keeper]}
+  - {name: keeper.env, owner: keykeeper, purpose: RUNTIME, consumers: [keeper]}
+  - {name: keeper-web.pem, owner: keykeeper, purpose: RUNTIME, consumers: [keeper]}
+  - {name: keeper-web-key.pem, owner: keykeeper, purpose: RUNTIME, consumers: [keeper]}
+processes:
+  - id: keeper-trust-init
+    artifact: keykeeper-adapted
+    userId: 65532
+    oneShot: true
+    networks: [identity-web, bao-web]
+    entrypoint: /bin/sh
+    command:
+      - -ec
+      - |
+        test -z "$(ls -A /trust)"; umask 077
+        test -s /opt/java/openjdk/lib/security/cacerts
+        /opt/java/openjdk/bin/keytool -importkeystore -noprompt \
+          -srckeystore /opt/java/openjdk/lib/security/cacerts -srcstorepass changeit \
+          -destkeystore /trust/trust.p12 -deststoretype PKCS12 -deststorepass changeit
+        for name in identity bao keeper; do
+          /opt/java/openjdk/bin/keytool -importcert -noprompt -alias "p0v3-$name" -file "/run/secrets/$name-ca.pem" -keystore /trust/trust.p12 -storetype PKCS12 -storepass changeit
+        done
+        sync
+    files:
+      - {file: identity-ca.pem, target: /run/secrets/identity-ca.pem}
+      - {file: bao-ca.pem, target: /run/secrets/bao-ca.pem}
+      - {file: keeper-ca.pem, target: /run/secrets/keeper-ca.pem}
+    volumes:
+      - {volume: keeper-trust, target: /trust}
+  - id: keeper
+    artifact: keykeeper-adapted
+    userId: 65532
+    memoryMiB: 512
+    networks: [identity-web, bao-web, keeper-web, ingress-control]
+    command: [serve, --oidc]
+    environmentFile: keeper.env
+    files:
+      - {file: keeper-web.pem, target: /run/secrets/keeper-web.pem}
+      - {file: keeper-web-key.pem, target: /run/secrets/keeper-web-key.pem}
+      - {file: keeper-ca.pem, target: /run/secrets/keeper-ca.pem}
+    volumes:
+      - {volume: keeper-trust, target: /trust}
+    readiness: [/opt/keykeeper/bin/p0-v3-keykeeper, probe]
+install:
+  processes: [keeper-trust-init, keeper]
+  dependencies:
+    keeper-trust-init: [keycloak, bao]
+    keeper: [keycloak, bao, keeper-trust-init, caddy]
+restore:
+  processes: [keeper]
+  dependencies:
+    keeper: [keycloak, bao, caddy]

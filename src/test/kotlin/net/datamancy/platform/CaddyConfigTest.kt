@@ -1,6 +1,7 @@
 package net.datamancy.platform
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -48,9 +49,27 @@ class CaddyConfigTest {
         assertFailsWith<IllegalArgumentException> { CaddyRuntime.publish(spec, publication) }
         val public = CaddyRuntime.publish(spec.copy(store = RuntimeStore.CANONICAL_V2), publication)
         kotlin.test.assertEquals(publication, public.ingress)
-        assertTrue("ingress-egress" in public.processes.single().networks)
+        assertEquals("ingress-egress", public.networks.first())
+        assertEquals("ingress-egress", public.processes.single().networks.first())
         assertFailsWith<IllegalArgumentException> { CaddyRuntime.publish(public, publication) }
     }
+    @Test fun `composed Caddy joins only declared app web networks and never database or admin networks`(): Unit {
+        val inventory = AcquiredInventory(1, "unit", listOf(AcquiredImage("caddy", "unit", "example.org/app:tag",
+            image, "b".repeat(64), listOf(image), "sha256:" + "a".repeat(64), "amd64", "linux")))
+        val base = CaddyRuntime.spec(inventory)
+        val app = RuntimeProcess("ntfy-web", image, "b".repeat(64), 1000,
+            networks = listOf("ntfy-web"), readiness = listOf("true"))
+        val sql = RuntimeProcess("postgres", image, "b".repeat(64), 1000,
+            networks = listOf("sql-admin"), readiness = listOf("true"))
+        val composed = base.copy(networks = base.networks + listOf("ntfy-web", "sql-admin"), processes = base.processes + app + sql)
+        val connected = CaddyRuntime.withFrontendNetworks(composed, setOf("ntfy-web"))
+        assertTrue("ntfy-web" in connected.processes.single { it.id == "caddy" }.networks)
+        assertFalse("sql-admin" in connected.processes.single { it.id == "caddy" }.networks)
+        kotlin.test.assertEquals(connected, CaddyRuntime.withFrontendNetworks(connected, setOf("ntfy-web")))
+        assertFailsWith<IllegalArgumentException> { CaddyRuntime.withFrontendNetworks(composed, setOf("sql-admin")) }
+        assertFailsWith<IllegalArgumentException> { CaddyRuntime.withFrontendNetworks(composed, setOf("unowned-web")) }
+    }
+
     @Test fun `self routes missing ACME state and unapproved hosts cannot render`() {
         assertFailsWith<IllegalArgumentException> { CaddyConfig.offline(lock(), emptySet(), AcmeEnvironment.PRODUCTION) }
         assertFailsWith<IllegalArgumentException> { CaddyConfig.offline(lock(false), setOf("notify.datamancy.net"), AcmeEnvironment.PRODUCTION) }

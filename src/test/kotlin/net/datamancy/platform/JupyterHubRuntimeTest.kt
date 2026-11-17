@@ -8,7 +8,7 @@ class JupyterHubRuntimeTest {
         val pin = if (it == "caddy") HulyRuntime.CADDY_BASE else "example.org/$it@sha256:" + "a".repeat(64)
         AcquiredImage(it, "upstream", "example.org/$it:1", pin, "b".repeat(64), emptyList(), pin.substringAfter('@'), "amd64", "linux")
     })
-    @Test fun `native hub allocates isolated homes and restricts browser origins without runtime socket access`() {
+    @Test fun `native hub allocates isolated homes and restricts browser origins without runtime socket access`(): Unit {
         val spec = JupyterHubRuntime.spec(inventory)
         val inputs = JupyterHubRuntime.inputs { host -> mapOf("ca.pem" to "$host-ca\n", "web.pem" to "$host-web\n", "web-key.pem" to "$host-key\n") }
         assertEquals(SingleUserRestore.inputNames(spec), inputs.keys)
@@ -33,7 +33,38 @@ class JupyterHubRuntimeTest {
         assertFails { JupyterHubRuntime.spec(inventory.copy(images = emptyList())) }
         assertFails { JupyterHubRuntime.spec(inventory.copy(images = inventory.images.map { it.copy(architecture = "arm64") })) }
     }
-    @Test fun `private certificates admit only bounded explicit DNS names`() {
+    @Test fun `canonical Hub and personal notebook retain separate original state and scoped inputs`(): Unit {
+        val hub = JupyterHubRuntime.canonicalFragment(inventory, "canonical-files")
+        assertEquals(setOf("hub-data", "hub-web"), hub.spec.networks.toSet())
+        assertEquals(setOf("alice", "bob", "hub", "hub-controller"), hub.spec.processes.map { it.id }.toSet())
+        assertEquals(setOf("hub-web"), hub.webNetworks)
+        assertTrue(hub.providerNetworks.isEmpty())
+        assertEquals(hub.spec.volumes, JupyterHubRuntime.coldRestoreFragment(hub).spec.volumes)
+        val hubInputs = JupyterHubRuntime.canonicalInputs { host -> mapOf("ca.pem" to "$host-ca\n",
+            "web.pem" to "$host-web\n", "web-key.pem" to "$host-key\n") }
+        assertEquals(PrivateDeployment.inputNames(hub.spec).toSet(), hubInputs.keys)
+        assertEquals("hub-ca\n", hubInputs.getValue("jupyterhub-ca.pem"))
+        assertEquals(listOf(RuntimeFile("jupyterhub-ca.pem", "/run/secrets/hub-ca.pem")),
+            hub.spec.processes.single { it.id == "hub" }.files.filter { it.file == "jupyterhub-ca.pem" })
+        assertTrue(hub.spec.processes.filter { it.id != "hub" }.all { process ->
+            process.files.none { it.file == "jupyterhub-ca.pem" } })
+        assertFalse("jupyterhub-ca.pem" in JupyterHubRuntime.inputs { host -> mapOf(
+            "ca.pem" to "$host-ca\n", "web.pem" to "$host-web\n", "web-key.pem" to "$host-key\n") })
+        val ingress = hubInputs.getValue("jupyterhub-caddyfile")
+        assertContains(ingress, "reverse_proxy hub-controller:8000")
+        assertContains(ingress, "not header Origin https://notebooks.datamancy.net")
+        assertFalse("respond @notebooks" in ingress)
+        assertContains(hubInputs.getValue("jupyterhub-hub-config.py"), "c.JupyterHub.subdomain_host = ''")
+        assertContains(hubInputs.getValue("jupyterhub-alice.env"),
+            "JUPYTERHUB_OAUTH_CALLBACK_URL=https://notebooks.datamancy.net/user/alice/oauth_callback")
+        val personal = NotebookRuntime.canonicalFragment(inventory, "canonical-files")
+        assertEquals(setOf("notebook-data", "notebook-web"), personal.spec.networks.toSet())
+        val personalInputs = NotebookRuntime.canonicalInputs { "1".repeat(64) }
+        assertEquals(PrivateDeployment.inputNames(personal.spec).toSet(), personalInputs.keys)
+        assertEquals(personal.spec.volumes, NotebookRuntime.coldRestoreFragment(personal).spec.volumes)
+        assertFails { NotebookRuntime.canonicalInputs { "!untrusted" } }
+    }
+    @Test fun `private certificates admit only bounded explicit DNS names`(): Unit {
         var extension = ""
         PrivateWebPki.generate("hub", listOf("hub", "alice.hub", "bob.hub")) { root, args ->
             if (Files.exists(root.resolve("web.ext"))) extension = Files.readString(root.resolve("web.ext"))

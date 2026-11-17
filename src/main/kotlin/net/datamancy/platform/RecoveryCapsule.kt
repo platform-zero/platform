@@ -34,7 +34,49 @@ import kotlinx.serialization.json.Json
     val volumes: List<RecoveryVolume> = emptyList(),
     @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
-    val controllerFiles: List<String> = emptyList())
+    val controllerFiles: List<String> = emptyList(),
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val managedFiles: List<String> = emptyList(),
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val quadletSources: List<QuadletColdSourceEvidence> = emptyList(),
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val credentialFiles: List<CapsuleFile> = emptyList())
+
+/** Credential bytes remain a separate, strictly typed and authenticated partition of
+ * capsule payload files; legacy capsules serialize identically when it is absent. */
+internal object RecoveryCredentialFiles {
+    private val hash = Regex("[a-f0-9]{64}")
+    private val revision = Regex("cert-[a-f0-9]{24}\\.json")
+    fun validate(manifest: CapsuleManifest) {
+        val entries = manifest.credentialFiles
+        val expected = manifest.files.filter { it.name.startsWith("credential-revisions/") }
+        require(entries.size <= 4096 && entries.distinct() == entries && entries == expected &&
+            entries.none { it.name in manifest.controllerFiles || it.name in manifest.managedFiles } &&
+            entries.all { entry ->
+                entry.bytes in 1..65536 && hash.matches(entry.sha256) &&
+                    entry.name.startsWith("credential-revisions/public/") &&
+                    entry.name.removePrefix("credential-revisions/public/").let { suffix ->
+                        suffix == "head.json" ||
+                            suffix.startsWith("head-history/") &&
+                                suffix.removePrefix("head-history/").matches(Regex("[a-f0-9]{64}\\.json")) ||
+                            suffix.matches(revision) ||
+                            suffix.startsWith("observations/") &&
+                                suffix.removePrefix("observations/").matches(revision) ||
+                            suffix.startsWith("turn/") &&
+                                suffix.removePrefix("turn/").matches(
+                                    Regex("[a-z0-9-]{1,64}\\.(intent|result)\\.json"))
+                    }
+            } && entries.filter { it.name.startsWith("credential-revisions/public/turn/") &&
+                it.name.endsWith(".result.json") }.all { result ->
+                entries.any { it.name == result.name.removeSuffix(".result.json") + ".intent.json" }
+            } && (entries.isEmpty() || entries.any { it.name == "credential-revisions/public/head.json" })) {
+            "Unknown, overlapping or incomplete public credential capsule partition"
+        }
+    }
+}
 @Serializable internal data class CapsuleVerification(val id: String, val generation: String, val bundleSha256: String,
     val archiveSha256: String, val manifestSha256: String, val files: Int, val plaintextBytes: Long,
     val authenticated: Boolean = true, val functionalRestoreVerified: Boolean = false)
@@ -44,7 +86,26 @@ import kotlinx.serialization.json.Json
  */
 internal object RecoveryCapsule {
     const val MAX_FILE = 1073741824L
-    const val MAX_TOTAL = 8589934592L
+    // Hard ceiling, not a scratch allocation. GenerationRuntime must admit the release-bound
+    // reservation before effects; payloads and Kopia stream in bounded buffers.
+    const val MAX_TOTAL = 549755813888L
+    const val PROTECTED_HEADROOM = 10737418240L
+    /** Conservative, overflow-safe admission before the first source fence or repository write.
+     * Export + segmented parts + immutable Kopia staging + restored materialization are independent
+     * scratch occupants. The caller provides observed available space, not a plan assertion.
+     */
+    fun requiredScratchBytes(diskReservationMiB: Long, simultaneousCopies: Int): Long {
+        require(diskReservationMiB in 1024..524288 && simultaneousCopies in 1..4)
+        val bytes = Math.multiplyExact(diskReservationMiB, 1048576L)
+        require(bytes <= MAX_TOTAL) { "Release exceeds pinned recovery payload ceiling" }
+        return Math.addExact(Math.multiplyExact(bytes, simultaneousCopies.toLong()),
+            Math.addExact(PROTECTED_HEADROOM, 536870912L))
+    }
+    fun admitScratch(diskReservationMiB: Long, simultaneousCopies: Int, availableBytes: Long) {
+        require(availableBytes >= requiredScratchBytes(diskReservationMiB, simultaneousCopies)) {
+            "Release-scale recovery scratch reservation unavailable"
+        }
+    }
     private val magic = "P0V3CAP1".toByteArray(Charsets.US_ASCII)
     private val json = Json { ignoreUnknownKeys = false; encodeDefaults = true }
     private val mode = PosixFilePermissions.fromString("rw-------")
@@ -84,6 +145,9 @@ internal object RecoveryCapsule {
     private fun validate(manifest: CapsuleManifest) {
         RecoverySegments.validate(manifest)
         RecoveryControllerPayloads.validate(manifest)
+        GenerationManagedComponents.validate(manifest)
+        RecoveryCredentialFiles.validate(manifest)
+        QuadletColdEvidence.validate(manifest)
         require(manifest.schemaVersion == 1 && manifest.id.matches(Regex("cap-[a-f0-9]{12}")) &&
             manifest.generation.matches(Regex("q-[a-f0-9]{12}")) && digest.matches(manifest.bundleSha256) &&
             manifest.members.isNotEmpty() && manifest.members.size <= 64 &&

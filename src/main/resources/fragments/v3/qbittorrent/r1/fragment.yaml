@@ -1,0 +1,56 @@
+schemaVersion: 2
+id: private-qbittorrent
+revision: 1
+product: qbittorrent
+artifacts: [qbittorrent]
+providers: [caddy]
+networks: [transfer-data, transfer-web]
+providerNetworks:
+  caddy: [transfer-web]
+webNetworks: [transfer-web]
+volumes:
+  - {id: qbittorrent-config, userId: 1000}
+  - {id: qbittorrent-downloads, userId: 1000}
+inputs:
+  - {name: qbittorrent-qbittorrent.env, owner: qbittorrent, purpose: RUNTIME, consumers: [qbittorrent-config-init, qbittorrent]}
+  - {name: qbittorrent-qbittorrent.conf, owner: qbittorrent, purpose: BOOTSTRAP, consumers: [qbittorrent-config-init]}
+processes:
+  - id: qbittorrent-config-init
+    artifact: qbittorrent
+    userId: 1000
+    oneShot: true
+    memoryMiB: 512
+    networks: [transfer-data]
+    entrypoint: /bin/sh
+    environmentFile: qbittorrent-qbittorrent.env
+    volumes:
+      - {volume: qbittorrent-config, target: /config}
+    files:
+      - {file: qbittorrent-qbittorrent.conf, target: /run/secrets/qbittorrent.conf}
+    command:
+      - -ec
+      - >-
+        mkdir -p /config/qBittorrent; test ! -e /config/qBittorrent/qBittorrent.conf;
+        cp /run/secrets/qbittorrent.conf /config/qBittorrent/qBittorrent.conf;
+        chmod 600 /config/qBittorrent/qBittorrent.conf
+  - id: qbittorrent
+    artifact: qbittorrent
+    userId: 1000
+    memoryMiB: 512
+    networks: [transfer-data, transfer-web]
+    entrypoint: /app/qbittorrent-nox
+    command: [--webui-port=8080]
+    environmentFile: qbittorrent-qbittorrent.env
+    volumes:
+      - {volume: qbittorrent-config, target: /config}
+      - {volume: qbittorrent-downloads, target: /downloads}
+    readinessHttpPort: 8080
+install:
+  processes: [qbittorrent-config-init, qbittorrent]
+  dependencies:
+    qbittorrent-config-init: []
+    qbittorrent: [qbittorrent-config-init, caddy]
+restore:
+  processes: [qbittorrent]
+  dependencies:
+    qbittorrent: [caddy]

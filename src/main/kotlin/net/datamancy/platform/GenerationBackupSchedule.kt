@@ -21,21 +21,39 @@ import kotlinx.serialization.json.Json
 @Serializable internal data class BackupScheduleResult(val slot: BackupScheduleSlot, val backup: GenerationBackupOutcome? = null,
     val failureType: String? = null)
 @Serializable internal data class BackupScheduleTick(val status: String, val slot: BackupScheduleSlot? = null)
+@Serializable internal data class BackupScheduleMissingResultReadback(val schemaVersion: Int = 1,
+    val bindingSha256: String, val slot: BackupScheduleSlot, val originalIntentSha256: String,
+    val nativeOutcomeSha256: String, val workerQuiescence: ActivationInput,
+    val referenceWriterExclusion: ActivationInput, val originalAcknowledged: Boolean = false,
+    val disposition: String = "native-complete-original-schedule-result-absent")
+@Serializable internal data class BackupScheduleTerminalReadback(val schemaVersion: Int = 1,
+    val bindingSha256: String, val slot: BackupScheduleSlot, val originalFailureSha256: String,
+    val nativeOutcomeSha256: String, val originalAcknowledged: Boolean = false,
+    val disposition: String = "native-source-resumed-original-schedule-failed")
 
 /** Daily canonical-generation controller job. No direct live-volume snapshots, pruning or whole-release claim. */
 internal class GenerationBackupSchedule(private val base: Path, private val now: () -> Instant,
     private val checkSource: (AcquiredInventory, String, String) -> Unit,
     private val backup: (AcquiredInventory, String, String, String) -> GenerationBackupOutcome,
-    private val checkController: (BackupScheduleBinding) -> Unit) {
+    private val checkController: (BackupScheduleBinding) -> Unit,
+    private val missingResultQuiescence: (BackupScheduleBinding, BackupScheduleSlot) -> ActivationInput = { _, _ ->
+        error("Original schedule worker quiescence has no core owner proof") },
+    private val referenceWriterExclusion: (BackupScheduleBinding, BackupScheduleSlot, GenerationBackupOutcome) -> ActivationInput = { _, _, _ ->
+        error("Source reference writer exclusion has no core owner proof") }) {
     companion object {
         private val json = Json { encodeDefaults = true }
         private val privateDir = PosixFilePermissions.fromString("rwx------")
         private val privateFile = PosixFilePermissions.fromString("rw-------")
-        fun real(): GenerationBackupSchedule {
+        fun real(
+            missingResultQuiescence: (BackupScheduleBinding, BackupScheduleSlot) -> ActivationInput = { _, _ ->
+                error("Original schedule worker quiescence has no core owner proof") },
+            referenceWriterExclusion: (BackupScheduleBinding, BackupScheduleSlot, GenerationBackupOutcome) -> ActivationInput = { _, _, _ ->
+                error("Source reference writer exclusion has no core owner proof") }): GenerationBackupSchedule {
             val runtime = GenerationRuntime.real()
             return GenerationBackupSchedule(GenerationRuntime.BASE, Instant::now, runtime::checkBackupSource,
                 { inventory, generation, bundle, capture -> runtime.backupKopia(inventory, generation, bundle, capture) },
-                { PinnedBackupController.verify(it.controllerSha256) })
+                { PinnedBackupController.verify(it.controllerSha256) },
+                missingResultQuiescence, referenceWriterExclusion)
         }
         fun validate(binding: BackupScheduleBinding) {
             RuntimeBackupAccess(binding.generation, "cap-000000000000", binding.bundleSha256).validate()
@@ -121,13 +139,132 @@ internal class GenerationBackupSchedule(private val base: Path, private val now:
         val binding = binding(root(generation), expected)
         return BackupScheduleUnits.render(binding, expected)
     }
+    /** A lost scheduled callback ACK remains a failure. Only the *same* completed native
+     * capture and independently retained source-resume/reference proof may dispose the
+     * daily schedule fence for future days. Never resubmit its deterministic capture ID.
+     */
+    fun reconcileNativeCompletion(generation: String, expected: String, date: String): BackupScheduleTerminalReadback =
+        locked(generation, expected) { root, binding ->
+            checkController(binding)
+            require(java.time.LocalDate.parse(date).toString() == date && date >= day(Instant.parse(binding.enrolledAt)))
+            require(read(root.resolve("failure.alert")).decodeToString() == expected)
+            val slot = slot(expected, date)
+            val location = root.resolve("slots/$date")
+            dir(location)
+            require(json.decodeFromString<BackupScheduleSlot>(read(location.resolve("intent.json")).decodeToString()) == slot)
+            val original = read(location.resolve("result.json"))
+            val failed = json.decodeFromString<BackupScheduleResult>(original.decodeToString())
+            require(failed.slot == slot && failed.failureType != null && failed.backup == null) {
+                "Only a retained original failed schedule result admits independent disposition"
+            }
+            val inventory = read(root.resolve("inventory.json"))
+            require(ReleaseLocks.sha256(inventory) == binding.inventorySha256)
+            checkSource(json.decodeFromString(inventory.decodeToString()), generation, binding.bundleSha256)
+            val source = base.resolve(generation)
+            val nativeBytes = ReleasePrivateFiles.read(source.resolve("backups/${slot.capture}/result.json"))
+            val native = json.decodeFromString<GenerationBackupOutcome>(nativeBytes.decodeToString())
+            validateBackup(binding, slot, native)
+            RecoveryReferenceOperations.authority(base, generation, binding.bundleSha256).requireTerminalDaily(native)
+            val result = BackupScheduleTerminalReadback(bindingSha256 = expected, slot = slot,
+                originalFailureSha256 = ReleaseLocks.sha256(original), nativeOutcomeSha256 = ReleaseLocks.sha256(nativeBytes))
+            save(location.resolve("terminal-readback.json"), json.encodeToString(result))
+            result
+        }
+
+    /** Distinct original-result-ABSENT disposition. The two injected owner proofs MUST be
+     * typed current observations, not files this schedule can issue or derive from its own alert. */
+    fun reconcileMissingResult(generation: String, expected: String, date: String): BackupScheduleMissingResultReadback =
+        locked(generation, expected) { root, binding ->
+            checkController(binding)
+            require(java.time.LocalDate.parse(date).toString() == date && date >= day(Instant.parse(binding.enrolledAt)))
+            require(read(root.resolve("failure.alert")).decodeToString() == expected)
+            val slot = slot(expected, date)
+            val location = root.resolve("slots/$date"); dir(location)
+            val original = read(location.resolve("intent.json"))
+            require(json.decodeFromString<BackupScheduleSlot>(original.decodeToString()) == slot &&
+                !Files.exists(location.resolve("result.json"), NOFOLLOW_LINKS) &&
+                !Files.exists(location.resolve("terminal-readback.json"), NOFOLLOW_LINKS))
+            val inventory = read(root.resolve("inventory.json"))
+            require(ReleaseLocks.sha256(inventory) == binding.inventorySha256)
+            checkSource(json.decodeFromString(inventory.decodeToString()), generation, binding.bundleSha256)
+            val nativeBytes = ReleasePrivateFiles.read(base.resolve(generation).resolve("backups/${slot.capture}/result.json"))
+            val native = json.decodeFromString<GenerationBackupOutcome>(nativeBytes.decodeToString())
+            validateBackup(binding, slot, native)
+            RecoveryReferenceOperations.authority(base, generation, binding.bundleSha256).requireTerminalDaily(native)
+            val worker = missingResultQuiescence(binding, slot)
+            val writer = referenceWriterExclusion(binding, slot, native)
+            requirePinnedOwnerProof(worker, binding, slot, "worker-quiescence")
+            requirePinnedOwnerProof(writer, binding, slot, "reference-writer-exclusion")
+            require(worker.path != writer.path && worker.sha256 != writer.sha256)
+            val readback = BackupScheduleMissingResultReadback(bindingSha256 = expected, slot = slot,
+                originalIntentSha256 = ReleaseLocks.sha256(original), nativeOutcomeSha256 = ReleaseLocks.sha256(nativeBytes),
+                workerQuiescence = worker, referenceWriterExclusion = writer)
+            save(location.resolve("missing-result-terminal.json"), json.encodeToString(readback))
+            readback
+        }
+
+    private fun requirePinnedOwnerProof(proof: ActivationInput, binding: BackupScheduleBinding,
+        slot: BackupScheduleSlot, label: String) {
+        val path = Path.of(proof.path)
+        require(proof.sha256.matches(Regex("[a-f0-9]{64}")) && path.isAbsolute &&
+            path.normalize() == path && path.startsWith(base.resolve(binding.generation).resolve("backup-schedule/owner-proofs")) &&
+            path.fileName.toString() == "${slot.day}-$label.json" &&
+            ReleaseLocks.sha256(ReleasePrivateFiles.read(path, 1048576)) == proof.sha256) {
+            "Missing-result core owner $label changed or absent"
+        }
+    }
+    private fun missingTerminal(root: Path, binding: BackupScheduleBinding, slot: BackupScheduleSlot) {
+        val location = root.resolve("slots/${slot.day}")
+        require(!Files.exists(location.resolve("result.json"), NOFOLLOW_LINKS)) {
+            "Original schedule result arrived after absent-result terminal; stop for core review"
+        }
+        val intent = read(location.resolve("intent.json"))
+        val disposition = json.decodeFromString<BackupScheduleMissingResultReadback>(
+            read(location.resolve("missing-result-terminal.json")).decodeToString())
+        require(disposition.schemaVersion == 1 && disposition.bindingSha256 == slot.bindingSha256 &&
+            disposition.slot == slot && !disposition.originalAcknowledged &&
+            disposition.disposition == "native-complete-original-schedule-result-absent" &&
+            disposition.originalIntentSha256 == ReleaseLocks.sha256(intent))
+        val nativeBytes = ReleasePrivateFiles.read(base.resolve(binding.generation)
+            .resolve("backups/${slot.capture}/result.json"))
+        require(disposition.nativeOutcomeSha256 == ReleaseLocks.sha256(nativeBytes))
+        val native = json.decodeFromString<GenerationBackupOutcome>(nativeBytes.decodeToString())
+        validateBackup(binding, slot, native)
+        RecoveryReferenceOperations.authority(base, binding.generation, binding.bundleSha256).requireTerminalDaily(native)
+        val worker = missingResultQuiescence(binding, slot)
+        val writer = referenceWriterExclusion(binding, slot, native)
+        requirePinnedOwnerProof(worker, binding, slot, "worker-quiescence")
+        requirePinnedOwnerProof(writer, binding, slot, "reference-writer-exclusion")
+        require(disposition.workerQuiescence == worker && disposition.referenceWriterExclusion == writer)
+    }
+
+    private fun terminal(root: Path, binding: BackupScheduleBinding, slot: BackupScheduleSlot,
+        original: ByteArray, outcome: BackupScheduleResult) {
+        require(outcome.slot == slot && outcome.failureType != null && outcome.backup == null)
+        val disposition = json.decodeFromString<BackupScheduleTerminalReadback>(read(
+            root.resolve("slots/${slot.day}/terminal-readback.json")).decodeToString())
+        require(disposition.schemaVersion == 1 && !disposition.originalAcknowledged &&
+            disposition.bindingSha256 == slot.bindingSha256 && disposition.slot == slot &&
+            disposition.originalFailureSha256 == ReleaseLocks.sha256(original) &&
+            disposition.disposition == "native-source-resumed-original-schedule-failed")
+        val nativeBytes = ReleasePrivateFiles.read(base.resolve(binding.generation)
+            .resolve("backups/${slot.capture}/result.json"))
+        require(disposition.nativeOutcomeSha256 == ReleaseLocks.sha256(nativeBytes))
+        val native = json.decodeFromString<GenerationBackupOutcome>(nativeBytes.decodeToString())
+        validateBackup(binding, slot, native)
+        RecoveryReferenceOperations.authority(base, binding.generation, binding.bundleSha256).requireTerminalDaily(native)
+    }
+
     fun tick(generation: String, expected: String): BackupScheduleTick = locked(generation, expected) { root, binding ->
         checkController(binding)
         if (Files.exists(root.resolve("suspended"), NOFOLLOW_LINKS)) {
             require(read(root.resolve("suspended")).decodeToString() == expected)
             return@locked BackupScheduleTick("suspended")
         }
-        require(!Files.exists(root.resolve("failure.alert"), NOFOLLOW_LINKS)) { "Schedule failure retained; automatic retry forbidden" }
+        val alert = Files.exists(root.resolve("failure.alert"), NOFOLLOW_LINKS)
+        if (alert) require(read(root.resolve("failure.alert")).decodeToString() == expected) {
+            "Unknown schedule failure alert"
+        }
         val inventory = read(root.resolve("inventory.json"))
         require(ReleaseLocks.sha256(inventory) == binding.inventorySha256) { "Scheduled inventory changed" }
         val acquired = json.decodeFromString<AcquiredInventory>(inventory.decodeToString())
@@ -139,25 +276,76 @@ internal class GenerationBackupSchedule(private val base: Path, private val now:
             FileChannel.open(root, READ).use { it.force(true) }
         }
         dir(attempts)
-        val prior = Files.list(attempts).use { it.limit(129).toList() }
-        require(prior.size <= 128) { "Schedule history bound reached; no evidence deletion" }
+        val history = ScheduleHistory.inspect(root, expected, "daily")
+        require(history.lastDay == null || latest >= history.lastDay) { "Archived daily clock rollback" }
+        val prior = mutableListOf<Path>()
+        Files.list(attempts).use { paths -> paths.forEach { path ->
+            val day = path.fileName.toString()
+            require(day.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")) && java.time.LocalDate.parse(day).toString() == day)
+            if (day in history.archivedDays) {
+                dir(path) // Original evidence remains present at its original path.
+            } else {
+                require(history.lastDay == null || day > history.lastDay) { "Unindexed old schedule slot" }
+                require(prior.size < ScheduleHistory.PAGE_SIZE) { "Unresolved active history bound reached" }
+                prior.add(path)
+            }
+        } }
         var completed = false
-        for (path in prior) {
+        for (path in prior.sorted()) {
             dir(path)
             val date = java.time.LocalDate.parse(path.fileName.toString()).toString()
             require(date == path.fileName.toString() && date <= latest && date >= day(Instant.parse(binding.enrolledAt))) { "Invalid slot or clock rollback" }
             val intent = json.decodeFromString<BackupScheduleSlot>(read(path.resolve("intent.json")).decodeToString())
             require(intent == slot(expected, date)) { "Foreign scheduled operation identity" }
             try {
-                val result = json.decodeFromString<BackupScheduleResult>(read(path.resolve("result.json")).decodeToString())
-                require(result.slot == intent && result.failureType == null)
-                validateBackup(binding, intent, requireNotNull(result.backup))
+                if (Files.exists(path.resolve("missing-result-terminal.json"), NOFOLLOW_LINKS))
+                    missingTerminal(root, binding, intent)
+                else {
+                    val original = read(path.resolve("result.json"))
+                    val result = json.decodeFromString<BackupScheduleResult>(original.decodeToString())
+                    require(result.slot == intent)
+                    if (result.failureType == null) validateBackup(binding, intent, requireNotNull(result.backup))
+                    else terminal(root, binding, intent, original, result)
+                }
             } catch (e: InterruptedException) { throw e }
             catch (e: Exception) { alert(root, expected); throw IllegalStateException("Unknown or failed scheduled backup; never resubmit", e) }
             if (date == latest) completed = true
         }
-        if (completed) return@locked BackupScheduleTick("already-completed", slot(expected, latest))
-        require(prior.size < 128) { "Schedule history bound reached; no evidence deletion" }
+        if (alert) {
+            val disposed = (prior.map { it.fileName.toString() } + history.archivedDays).filter { date ->
+                Files.exists(attempts.resolve(date).resolve("terminal-readback.json"), NOFOLLOW_LINKS) ||
+                    Files.exists(attempts.resolve(date).resolve("missing-result-terminal.json"), NOFOLLOW_LINKS)
+            }
+            require(disposed.size == 1) { "Schedule failure has no unique independent native readback" }
+            val date = disposed.single()
+            val slot = slot(expected, date)
+            if (Files.exists(attempts.resolve(date).resolve("missing-result-terminal.json"), NOFOLLOW_LINKS))
+                missingTerminal(root, binding, slot)
+            else {
+                val original = read(attempts.resolve(date).resolve("result.json"))
+                terminal(root, binding, slot, original,
+                    json.decodeFromString<BackupScheduleResult>(original.decodeToString()))
+            }
+        }
+        if (completed || history.lastDay == latest)
+            return@locked BackupScheduleTick(if (Files.exists(attempts.resolve(latest)
+                .resolve("missing-result-terminal.json"), NOFOLLOW_LINKS)) "native-terminal-original-result-absent"
+                else "already-completed", slot(expected, latest))
+        if (prior.size == ScheduleHistory.PAGE_SIZE) {
+            if (Files.exists(base.resolve("$generation/bundle.json"), NOFOLLOW_LINKS)) {
+                val references = RecoveryReferenceOperations.authority(base, generation, binding.bundleSha256)
+                prior.forEach { path ->
+                    if (Files.exists(path.resolve("missing-result-terminal.json"), NOFOLLOW_LINKS)) {
+                        val original = slot(expected, path.fileName.toString())
+                        missingTerminal(root, binding, original)
+                    } else {
+                        val record = json.decodeFromString<BackupScheduleResult>(read(path.resolve("result.json")).decodeToString())
+                        references.requireTerminalDaily(requireNotNull(record.backup))
+                    }
+                }
+            }
+            ScheduleHistory.checkpoint(root, expected, "daily", prior.map { it.fileName.toString() }.sorted())
+        }
         val slot = slot(expected, latest) // At most ONE latest due slot; missed slots are never replayed in a burst.
         val attempt = attempts.resolve(latest)
         Files.createDirectory(attempt, PosixFilePermissions.asFileAttribute(privateDir))
@@ -189,6 +377,103 @@ internal class GenerationBackupSchedule(private val base: Path, private val now:
             result.sourceResumed && result.failureType == null) { "Scheduled backup did not safely complete" }
         val snapshot = requireNotNull(result.snapshot); KopiaGenerationStore.validate(snapshot)
         require(snapshot.id == slot.capture && snapshot.generation == binding.generation && snapshot.bundleSha256 == binding.bundleSha256)
+        // Production callback success is not an independent completion proof. The runtime
+        // must have durably recorded the identical source resume result before this slot may
+        // be considered terminal or included in an immutable history checkpoint.
+        val source = base.resolve(binding.generation)
+        if (Files.exists(source.resolve("bundle.json"), NOFOLLOW_LINKS)) {
+            val native = json.decodeFromString<GenerationBackupOutcome>(ReleasePrivateFiles.read(
+                source.resolve("backups/${slot.capture}/result.json")).decodeToString())
+            require(native == result) { "Scheduled result differs from durable native source-resume outcome" }
+        }
+    }
+}
+
+@Serializable internal data class ScheduleHistoryEntry(val day: String, val resultSha256: String,
+    val evidenceFile: String = "result.json")
+@Serializable internal data class ScheduleHistorySegment(val schemaVersion: Int = 1, val kind: String,
+    val bindingSha256: String, val previousSha256: String, val entries: List<ScheduleHistoryEntry>)
+
+/** Immutable checkpoints, not removal of old slot files. Segment marker is the cursor; a
+ * partial intent/segment/marker is unknown and blocks ALL further tick effects. Every read
+ * authenticates the chain and each original result at its original evidence path.
+ */
+internal object ScheduleHistory {
+    private val json = Json { encodeDefaults = true }
+    private val hash = Regex("[a-f0-9]{64}")
+    const val PAGE_SIZE = 128
+    private const val MAX_SEGMENTS = 4096
+    data class Cursor(val lastDay: String?, val head: String, val segments: Int, val archivedDays: Set<String>)
+    fun inspect(root: Path, binding: String, kind: String): Cursor {
+        require(binding.matches(hash) && kind in setOf("daily", "weekly"))
+        val history = root.resolve("history")
+        if (!Files.exists(history, NOFOLLOW_LINKS)) return Cursor(null, binding, 0, emptySet())
+        ReleasePrivateFiles.directory(history)
+        val files = Files.list(history).use { it.limit(MAX_SEGMENTS * 3L + 1).toList() }
+        require(files.size <= MAX_SEGMENTS * 3 && files.size % 3 == 0) { "Partial schedule checkpoint retained" }
+        var previous = binding; var last: String? = null
+        val archived = mutableSetOf<String>()
+        for (index in 1..(files.size / 3)) {
+            val stem = "segment-%08d".format(index)
+            val intent = ReleasePrivateFiles.read(history.resolve("$stem.intent.json"))
+            val segmentBytes = ReleasePrivateFiles.read(history.resolve("$stem.json"))
+            val complete = ReleasePrivateFiles.read(history.resolve("$stem.complete.json")).decodeToString()
+            val segment = json.decodeFromString<ScheduleHistorySegment>(segmentBytes.decodeToString())
+            val digest = ReleaseLocks.sha256(segmentBytes)
+            require(segment.schemaVersion == 1 && segment.kind == kind && segment.bindingSha256 == binding &&
+                segment.previousSha256 == previous && complete == digest &&
+                intent.decodeToString() == "$kind\n$binding\n$previous\n" &&
+                segment.entries.size == PAGE_SIZE && segment.entries.map { it.day }.distinct().size == PAGE_SIZE) {
+                "Schedule checkpoint chain differs from its original completed slots"
+            }
+            for (entry in segment.entries) {
+                require(entry.day.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")) &&
+                    java.time.LocalDate.parse(entry.day).toString() == entry.day &&
+                    (last == null || entry.day > last) && entry.resultSha256.matches(hash))
+                require(entry.evidenceFile in setOf("result.json", "missing-result-terminal.json"))
+                val location = root.resolve("slots/${entry.day}")
+                if (entry.evidenceFile == "missing-result-terminal.json")
+                    require(!Files.exists(location.resolve("result.json"), NOFOLLOW_LINKS)) {
+                        "Original schedule ACK appeared after absent-result disposition"
+                    }
+                val original = ReleasePrivateFiles.read(location.resolve(entry.evidenceFile))
+                require(ReleaseLocks.sha256(original) == entry.resultSha256) { "Archived slot terminal evidence changed" }
+                require(archived.add(entry.day))
+                last = entry.day
+            }
+            previous = digest
+        }
+        require(files.all { path ->
+            val name = path.fileName.toString()
+            name.matches(Regex("segment-[0-9]{8}(\\.intent|\\.complete)?\\.json")) &&
+                name.substring(8, 16).toInt() in 1..(files.size / 3)
+        }) { "Foreign schedule archive entry" }
+        return Cursor(last, previous, files.size / 3, archived)
+    }
+    fun checkpoint(root: Path, binding: String, kind: String, completed: List<String>): Cursor {
+        require(completed.size == PAGE_SIZE && completed == completed.sorted() && completed.distinct().size == PAGE_SIZE)
+        val prior = inspect(root, binding, kind)
+        require(prior.segments < MAX_SEGMENTS && completed.all { prior.lastDay == null || it > prior.lastDay })
+        val history = root.resolve("history")
+        if (!Files.exists(history, NOFOLLOW_LINKS)) {
+            Files.createDirectory(history, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+            ReleasePrivateFiles.sync(root)
+        }
+        val stem = "segment-%08d".format(prior.segments + 1)
+        val entries = completed.map { day ->
+            val location = root.resolve("slots/$day")
+            val evidence = if (Files.exists(location.resolve("missing-result-terminal.json"), NOFOLLOW_LINKS)) {
+                require(!Files.exists(location.resolve("result.json"), NOFOLLOW_LINKS))
+                "missing-result-terminal.json"
+            } else "result.json"
+            ScheduleHistoryEntry(day, ReleaseLocks.sha256(ReleasePrivateFiles.read(location.resolve(evidence))), evidence)
+        }
+        ReleasePrivateFiles.save(history.resolve("$stem.intent.json"), "$kind\n$binding\n${prior.head}\n".toByteArray())
+        val bytes = json.encodeToString(ScheduleHistorySegment(kind = kind, bindingSha256 = binding,
+            previousSha256 = prior.head, entries = entries)).toByteArray()
+        ReleasePrivateFiles.save(history.resolve("$stem.json"), bytes)
+        ReleasePrivateFiles.save(history.resolve("$stem.complete.json"), ReleaseLocks.sha256(bytes).toByteArray())
+        return inspect(root, binding, kind)
     }
 }
 

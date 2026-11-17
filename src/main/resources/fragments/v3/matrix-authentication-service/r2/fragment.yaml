@@ -1,0 +1,99 @@
+schemaVersion: 2
+id: private-matrix-authentication-service
+revision: 2
+product: matrix-authentication-service
+artifacts: [postgres-timescale, matrix-authentication-service]
+providers: [postgres, synapse, keycloak, caddy]
+networks: [db-admin, mas-data, mas-web, identity-web]
+providerNetworks:
+  postgres: [mas-data]
+  caddy: [mas-web]
+webNetworks: [mas-web]
+volumes: []
+inputs:
+  - {name: mas-db-admin.env, owner: matrix-authentication-service, purpose: BOOTSTRAP, consumers: [mas-db-init]}
+  - {name: mas-runtime.env, owner: matrix-authentication-service, purpose: RUNTIME, consumers: [mas-migrate, mas-config-init, mas]}
+  - {name: mas.yaml, owner: matrix-authentication-service, purpose: RUNTIME, consumers: [mas-migrate, mas-config-init, mas]}
+  - {name: mas-signing.pem, owner: matrix-authentication-service, purpose: RUNTIME, consumers: [mas-migrate, mas-config-init, mas]}
+  - {name: postgres-ca.pem, owner: postgres, purpose: RUNTIME, consumers: [mas-db-init, mas-migrate, mas-config-init, mas]}
+  - {name: identity-ca.pem, owner: keycloak, purpose: RUNTIME, consumers: [mas-migrate, mas-config-init, mas]}
+processes:
+  - id: mas-db-init
+    artifact: postgres-timescale
+    userId: 999
+    oneShot: true
+    memoryMiB: 512
+    networks: [db-admin, mas-data]
+    entrypoint: /bin/sh
+    environmentFile: mas-db-admin.env
+    files:
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+    command:
+      - -ec
+      - |
+        export PGPASSWORD="$POSTGRES_PASSWORD"
+        psql -X -h postgres -U postgres -v ON_ERROR_STOP=1 <<SQL
+        CREATE ROLE mas LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '$MAS_PASSWORD';
+        CREATE DATABASE mas OWNER mas;
+        REVOKE ALL ON DATABASE mas FROM PUBLIC;
+        SQL
+  - id: mas-migrate
+    artifact: matrix-authentication-service
+    userId: 65532
+    oneShot: true
+    memoryMiB: 768
+    networks: [mas-data, mas-web]
+    entrypoint: /usr/local/bin/mas-cli
+    command: [-c, /run/secrets/mas.yaml, database, migrate]
+    environmentFile: mas-runtime.env
+    files:
+      - {file: mas.yaml, target: /run/secrets/mas.yaml}
+      - {file: mas-signing.pem, target: /run/secrets/mas-signing.pem}
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+      - {file: identity-ca.pem, target: /run/secrets/identity-ca.pem}
+  - id: mas-config-init
+    artifact: matrix-authentication-service
+    userId: 65532
+    oneShot: true
+    memoryMiB: 768
+    networks: [mas-data, mas-web]
+    entrypoint: /usr/local/bin/mas-cli
+    command: [-c, /run/secrets/mas.yaml, config, sync]
+    environmentFile: mas-runtime.env
+    files:
+      - {file: mas.yaml, target: /run/secrets/mas.yaml}
+      - {file: mas-signing.pem, target: /run/secrets/mas-signing.pem}
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+      - {file: identity-ca.pem, target: /run/secrets/identity-ca.pem}
+  - id: mas
+    artifact: matrix-authentication-service
+    userId: 65532
+    memoryMiB: 768
+    networks: [mas-data, mas-web, identity-web]
+    entrypoint: /usr/local/bin/mas-cli
+    command: [-c, /run/secrets/mas.yaml, server, --no-migrate, --no-sync]
+    environmentFile: mas-runtime.env
+    files:
+      - {file: mas.yaml, target: /run/secrets/mas.yaml}
+      - {file: mas-signing.pem, target: /run/secrets/mas-signing.pem}
+      - {file: postgres-ca.pem, target: /run/secrets/postgres-ca.pem}
+      - {file: identity-ca.pem, target: /run/secrets/identity-ca.pem}
+    readinessHttpPort: 8080
+    readinessHttpPath: /health
+install:
+  processes: [mas-db-init, mas-migrate, mas-config-init, mas]
+  dependencies:
+    mas-db-init: [postgres]
+    mas-migrate: [mas-db-init]
+    mas-config-init: [mas-migrate, keycloak, caddy, synapse]
+    mas: [mas-config-init, synapse, keycloak, caddy]
+  databaseAccess:
+    - {consumer: mas-migrate, provider: postgres, volume: postgres, database: mas, principal: mas, credentialFile: mas-runtime.env, network: mas-data}
+    - {consumer: mas-config-init, provider: postgres, volume: postgres, database: mas, principal: mas, credentialFile: mas-runtime.env, network: mas-data}
+    - {consumer: mas, provider: postgres, volume: postgres, database: mas, principal: mas, credentialFile: mas-runtime.env, network: mas-data}
+restore:
+  processes: [mas]
+  dependencies:
+    mas: [postgres, synapse, keycloak, caddy]
+  databaseAccess:
+    - {consumer: mas, provider: postgres, volume: postgres, database: mas, principal: mas, credentialFile: mas-runtime.env, network: mas-data}

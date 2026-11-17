@@ -1,0 +1,40 @@
+schemaVersion: 2
+id: private-portal
+revision: 1
+product: portal
+artifacts: [portal]
+providers: [caddy, keycloak-auth-gateway]
+providerProcesses:
+  caddy: [caddy]
+  keycloak-auth-gateway: [auth-gateway]
+networks: [portal-web]
+providerNetworks:
+  caddy: [portal-web]
+  keycloak-auth-gateway: [portal-web]
+webNetworks: [portal-web]
+inputs:
+  - {name: portal-settings.yaml, owner: portal, purpose: RUNTIME, consumers: [portal]}
+  - {name: portal-services.yaml, owner: portal, purpose: RUNTIME, consumers: [portal]}
+  - {name: portal-widgets.yaml, owner: portal, purpose: RUNTIME, consumers: [portal]}
+  - {name: portal.env, owner: portal, purpose: RUNTIME, consumers: [portal]}
+processes:
+  - id: portal
+    artifact: portal
+    userId: 1000
+    memoryMiB: 256
+    environmentFile: portal.env
+    files:
+      - {file: portal-settings.yaml, target: /app/config/settings.yaml}
+      - {file: portal-services.yaml, target: /app/config/services.yaml}
+      - {file: portal-widgets.yaml, target: /app/config/widgets.yaml}
+    readinessHttpPort: 3000
+    readinessHttpPath: /api/healthcheck
+    networks: [portal-web]
+install:
+  processes: [portal]
+  dependencies:
+    portal: [caddy, auth-gateway]
+restore:
+  processes: [portal]
+  dependencies:
+    portal: [caddy, auth-gateway]

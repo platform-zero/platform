@@ -36,6 +36,21 @@ internal object RssMaintenance {
         require(!Files.exists(root.resolve("maintenance-$id.complete"), NOFOLLOW_LINKS)) { "RSS maintenance operation already completed" }
         ReleasePrivateFiles.save(root.resolve("maintenance-$id.intent"), value)
     }
+    fun pending(root: Path, expected: String, id: String): String {
+        val value = bytes(expected, id)
+        require(ReleasePrivateFiles.read(root.resolve("maintenance-$id.intent")).contentEquals(value) &&
+            !Files.exists(root.resolve("maintenance-$id.complete"), NOFOLLOW_LINKS)) {
+            "Missing or completed RSS held-operation claim"
+        }
+        val other = Files.list(root).use { paths -> paths.filter {
+            it.fileName.toString().startsWith("maintenance-") && it.fileName.toString() != "maintenance-$id.intent"
+        }.limit(20001).toList() }
+        require(other.size <= 20000 && other.none { it.fileName.toString().endsWith(".intent") &&
+            !Files.exists(root.resolve(it.fileName.toString().removeSuffix(".intent") + ".complete"), NOFOLLOW_LINKS) }) {
+            "Multiple incomplete RSS maintenance intents"
+        }
+        return ReleaseLocks.sha256(value)
+    }
     fun complete(root: Path, expected: String, id: String) {
         val value = bytes(expected, id)
         require(ReleasePrivateFiles.read(root.resolve("maintenance-$id.intent")).contentEquals(value)) {

@@ -3,6 +3,8 @@ package net.datamancy.platform
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlin.test.*
 
 class ManagedPrivatePkiTest {
@@ -28,9 +30,46 @@ class ManagedPrivatePkiTest {
         try { action(root, Fake()) }
         finally { Files.walk(root).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
     }
+    @Test fun `managed CA adoption binds actual sealed consumer files and refuses stale revisions`(): Unit = test { root, fake ->
+        val runtimeBase = Files.createDirectory(root.resolve("runtime"))
+        Files.setPosixFilePermissions(runtimeBase, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"))
+        val authority = Files.createDirectory(root.resolve("authority"))
+        Files.setPosixFilePermissions(authority, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"))
+        val signer = ManagedPrivatePki(authority, fake::run, Instant::now, runtimeBase)
+        signer.initialize(first)
+        val issued = signer.issue(first, PrivatePkiProfile(PrivatePkiKind.WEB, "auth", listOf("auth", "auth.datamancy.net")))
+        val issueSha = ReleaseLocks.sha256(Files.readAllBytes(authority.resolve("$first.json")))
+        val member = "q-000000000001-identity-web"
+        val fingerprint = "c".repeat(64)
+        val image = "registry.example.invalid/identity@sha256:${"a".repeat(64)}"
+        val spec = PrivateDeploymentSpec(name = member, volumes = emptyList(), networks = listOf("identity-web"),
+            processes = listOf(RuntimeProcess("identity-web", image, "a".repeat(64), 1000, networks = listOf("identity-web"),
+                readiness = listOf("true"), files = listOf(RuntimeFile("ca.pem", "/run/secrets/ca.pem"),
+                    RuntimeFile("web.pem", "/run/secrets/web.pem"), RuntimeFile("web-key.pem", "/run/secrets/web-key.pem")))),
+            store = RuntimeStore.CANONICAL_V2)
+        val manifest = runtimeBase.resolve("$member.json")
+        ReleasePrivateFiles.save(manifest, Json.encodeToString(spec).toByteArray())
+        val inputs = Files.createDirectory(runtimeBase.resolve(member))
+        Files.setPosixFilePermissions(inputs, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"))
+        ReleasePrivateFiles.save(inputs.resolve("runtime.owner"), "p0v3-private-runtime-v1\n$member\n$fingerprint\n".toByteArray())
+        for (file in listOf("ca.pem", "web.pem", "web-key.pem"))
+            ReleasePrivateFiles.save(inputs.resolve(file), issued.material.getValue(file).toByteArray())
+        val digest = ReleaseLocks.sha256(Files.readAllBytes(manifest))
+        val adopted = signer.adopt(second, first, issueSha, manifest, digest, fingerprint, "ca.pem", "web.pem", "web-key.pem")
+        assertEquals(issued.caSha256, adopted.caSha256)
+        assertEquals(member, adopted.consumer)
+        assertFailsWith<Exception> { signer.adopt(second, first, issueSha, manifest, digest, fingerprint, "ca.pem", "web.pem", "web-key.pem") }
+        val wrong = inputs.resolve("web.pem")
+        Files.writeString(wrong, "tampered")
+        assertFailsWith<IllegalArgumentException> {
+            signer.adopt(third, first, issueSha, manifest, digest, fingerprint, "ca.pem", "web.pem", "web-key.pem")
+        }
+        assertFalse(Files.exists(authority.resolve("$third.adoption.json")))
+    }
+
     @Test fun `managed web renewal keeps trust and replaces only immutable leaf bundle`() = test { root, fake ->
         var clock = Instant.parse("2026-01-01T00:00:00Z")
-        val control = ManagedPrivatePki(root, fake::run) { clock }
+        val control = ManagedPrivatePki(root, fake::run, now = { clock })
         val caHash = control.initialize(first)
         val key = Files.readAllBytes(root.resolve("ca-key.pem"))
         val materials = PrivateWebPki.managed(control, first, "hub", listOf("hub", "alice.hub"))

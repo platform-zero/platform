@@ -1,0 +1,35 @@
+# Inputs are acquired and hash-sealed before this offline build. No apt/network resolution here.
+FROM docker.io/library/postgres@sha256:2cd2c0f809604aaeff6f0ec8f40aecbd025613107561015c69369a1a7f1d3416 AS build
+COPY debs/ /build/debs/
+COPY apt-lists/ /build/apt-lists/
+COPY timescaledb.tar.gz inputs.sha256 /build/
+COPY smoke.sh /build/smoke.sh
+WORKDIR /build
+# Pinned acquisition metadata and .debs are the only package inputs. No build network.
+RUN sha256sum -c inputs.sha256 && \
+    cp -a /build/apt-lists/. /var/lib/apt/lists/ && \
+    cp /build/debs/*.deb /var/cache/apt/archives/ && \
+    DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=0 --no-download \
+      --no-install-recommends -y install cmake make gcc libc6-dev libssl-dev \
+      postgresql-server-dev-17=17.11-1.pgdg12+2
+RUN test "$(/usr/lib/postgresql/17/bin/pg_config --version)" = 'PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2)' && \
+    mkdir source && tar -xzf timescaledb.tar.gz -C source --strip-components=1 && \
+    grep -qx 'version = 2.31.0' source/version.config && \
+    cmake -S source -B compile -DCMAKE_BUILD_TYPE=Release \
+      -DPG_CONFIG=/usr/lib/postgresql/17/bin/pg_config -DAPACHE_ONLY=OFF \
+      -DREGRESS_CHECKS=OFF -DUSE_TELEMETRY=OFF -DSEND_TELEMETRY_DEFAULT=OFF && \
+    cmake --build compile --parallel 2 && DESTDIR=/install cmake --install compile && \
+    mkdir -p /install/usr/share/doc/p0-timescaledb && \
+    cp source/LICENSE source/LICENSE-APACHE source/NOTICE source/tsl/LICENSE-TIMESCALE \
+       /install/usr/share/doc/p0-timescaledb/ && \
+    cp inputs.sha256 /install/usr/share/doc/p0-timescaledb/build-inputs.sha256 && \
+    dpkg-query -W > /install/usr/share/doc/p0-timescaledb/build-packages.tsv
+FROM docker.io/library/postgres@sha256:2cd2c0f809604aaeff6f0ec8f40aecbd025613107561015c69369a1a7f1d3416
+COPY --from=build /install/ /
+COPY smoke.sh /tmp/p0-timescale-smoke.sh
+RUN chmod 0755 /tmp/p0-timescale-smoke.sh && gosu postgres /tmp/p0-timescale-smoke.sh && rm /tmp/p0-timescale-smoke.sh
+LABEL org.opencontainers.image.source="https://github.com/timescale/timescaledb" \
+      org.opencontainers.image.revision="4fa2a7c6b579171a1a8966fd87a0d4189ebab43b" \
+      org.opencontainers.image.version="2.31.0-pg17.11" \
+      org.opencontainers.image.licenses="Apache-2.0 AND LicenseRef-Timescale" \
+      io.p0v3.artifact-purpose="private-development-not-qualified"

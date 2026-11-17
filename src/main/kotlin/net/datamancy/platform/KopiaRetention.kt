@@ -12,11 +12,15 @@ internal fun interface KopiaRetentionAuthority {
     fun withProtection(action: (KopiaRetentionProtection) -> KopiaRetentionResult): KopiaRetentionResult
 }
 
+internal data class KopiaRetentionCensusPage(val index: Int, val previousSha256: String,
+    val live: List<String>, val protectedIds: List<String>, val terminal: List<String>, val sha256: String)
+
 internal data class KopiaRetentionProtection(
     val referenceHeadSha256: String,
     val receipts: List<KopiaSnapshotReceipt>,
     val referencedSnapshotIds: Set<String>,
-    val functionallyVerifiedSnapshotIds: Set<String>
+    val functionallyVerifiedSnapshotIds: Set<String>,
+    val censusPages: List<KopiaRetentionCensusPage> = emptyList()
 )
 
 @Serializable internal data class KopiaRetentionPlan(
@@ -26,11 +30,33 @@ internal data class KopiaRetentionProtection(
 @Serializable internal data class KopiaRetentionResult(val plan: KopiaRetentionPlan, val afterSha256: String)
 @Serializable internal data class KopiaRetentionObservation(val id: String, val planSha256: String,
     val inventorySha256: String, val removed: List<String>, val status: String)
+@Serializable internal data class KopiaRetentionReadback(val schemaVersion: Int = 1,
+    val generation: String, val pendingSha256: String, val planSha256: String,
+    val first: KopiaRetentionObservation, val second: KopiaRetentionObservation,
+    val disposition: String, val originalAcknowledged: Boolean = false)
 
 /** Kopia computes calendar retention. Kotlin only adds reference/functional protection and exact identity checks.
  * Never remove pins: Kopia pin updates replace manifest IDs and would invalidate immutable recovery receipts.
  */
 internal object KopiaRetention {
+    /** Release-bound ledger census pages include current repository receipts, archived protected
+     * claims and immutable terminal tombstones. The ledger head anchors the first page; each
+     * subsequent page binds the prior digest. Neither a tombstone nor an unknown may be timed out.
+     */
+    fun censusPages(head: String, live: Set<String>, protectedIds: Set<String>, terminal: Set<String>): List<KopiaRetentionCensusPage> {
+        require(head.matches(Regex("[a-f0-9]{64}")) && protectedIds.all { it in live } && terminal.intersect(live).isEmpty())
+        val hash = Regex("[a-f0-9]{32,64}")
+        val all = (live + terminal).sorted()
+        require(all.size in 1..(128 * 4096) && all.all { it.matches(hash) })
+        var previous = head
+        return all.chunked(128).mapIndexed { index, page ->
+            val current = page.filter { it in live }
+            val held = page.filter { it in protectedIds }
+            val retired = page.filter { it in terminal }
+            val digest = ReleaseLocks.sha256("$index\n$previous\n${current.joinToString(",")}\n${held.joinToString(",")}\n${retired.joinToString(",")}\n".toByteArray())
+            KopiaRetentionCensusPage(index + 1, previous, current, held, retired, digest).also { previous = digest }
+        }
+    }
     fun inventory(text: String): Map<String, JsonObject> {
         require(text.toByteArray().size in 1..1048576) { "Oversized Kopia retention inventory" }
         val values = Json.parseToJsonElement(text).jsonArray.map { it.jsonObject }
@@ -46,6 +72,15 @@ internal object KopiaRetention {
             protection.referenceHeadSha256.matches(Regex("[a-f0-9]{64}")))
         val native = inventory(text)
         val receipts = protection.receipts.associateBy { it.snapshotId }
+        if (protection.censusPages.isNotEmpty()) {
+            val pages = censusPages(protection.referenceHeadSha256, receipts.keys,
+                protection.referencedSnapshotIds, protection.censusPages.flatMap { it.terminal }.toSet())
+            require(pages == protection.censusPages && pages.flatMap { it.live }.toSet() == native.keys &&
+                pages.flatMap { it.protectedIds }.toSet() == protection.referencedSnapshotIds &&
+                pages.flatMap { it.terminal }.none { it in native }) {
+                "Repository receipts or protected/terminal archive census changed"
+            }
+        }
         require(receipts.size == protection.receipts.size && receipts.keys == native.keys &&
             protection.receipts.map { it.id }.distinct().size == receipts.size) { "Exact retained receipt census required" }
         require(native.keys.containsAll(protection.referencedSnapshotIds) &&

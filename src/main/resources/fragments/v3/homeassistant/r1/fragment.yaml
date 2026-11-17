@@ -1,0 +1,61 @@
+schemaVersion: 2
+id: private-homeassistant
+revision: 1
+product: homeassistant
+artifacts: [homeassistant]
+providers: [caddy]
+networks: [home-data, home-web]
+providerNetworks:
+  caddy: [home-web]
+webNetworks: [home-web]
+volumes:
+  - {id: homeassistant-config, userId: 1000}
+inputs:
+  - {name: homeassistant-homeassistant.env, owner: homeassistant, purpose: RUNTIME, consumers: [homeassistant-config-init, homeassistant]}
+  - {name: homeassistant-configuration.yaml, owner: homeassistant, purpose: BOOTSTRAP, consumers: [homeassistant-config-init]}
+  - {name: homeassistant-recovery-guard.py, owner: homeassistant, purpose: RUNTIME, consumers: [homeassistant]}
+templates:
+  - {output: homeassistant-recovery-guard.py, resource: recovery-guard.py, format: LITERAL, parameters: {}}
+processes:
+  - id: homeassistant-config-init
+    artifact: homeassistant
+    userId: 1000
+    oneShot: true
+    memoryMiB: 2048
+    networks: [home-data]
+    entrypoint: /usr/local/bin/python3
+    environmentFile: homeassistant-homeassistant.env
+    volumes:
+      - {volume: homeassistant-config, target: /config}
+    files:
+      - {file: homeassistant-configuration.yaml, target: /run/secrets/configuration.yaml}
+    command:
+      - -c
+      - "from pathlib import Path; p=Path('/config/configuration.yaml'); f=p.open('xb'); f.write(Path('/run/secrets/configuration.yaml').read_bytes()); f.close()"
+  - id: homeassistant
+    artifact: homeassistant
+    userId: 1000
+    memoryMiB: 2048
+    networks: [home-data, home-web]
+    entrypoint: /usr/local/bin/python3
+    environmentFile: homeassistant-homeassistant.env
+    volumes:
+      - {volume: homeassistant-config, target: /config}
+    files:
+      - {file: homeassistant-recovery-guard.py, target: /run/secrets/recovery-guard.py}
+    command: [-m, homeassistant, --config, /config]
+    readinessHttpPort: 8123
+    readinessHttpPath: /manifest.json
+install:
+  processes: [homeassistant-config-init, homeassistant]
+  dependencies:
+    homeassistant-config-init: []
+    homeassistant: [homeassistant-config-init, caddy]
+restore:
+  processes: [homeassistant]
+  dependencies:
+    homeassistant: [caddy]
+  processOverrides:
+    homeassistant:
+      command: [/run/secrets/recovery-guard.py]
+      clearEnvironmentFile: true

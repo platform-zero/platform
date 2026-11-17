@@ -18,6 +18,7 @@ internal object RecoverySegments {
     private val mode = PosixFilePermissions.fromString("rw-------")
     private val hash = Regex("[a-f0-9]{64}")
     private val volume = Regex("q-[a-f0-9]{12}-[a-z][a-z0-9-]{0,23}/volumes/[a-z][a-z0-9-]*\\.tar")
+    private val managed = Regex("managed/(home|workspace|manifests|transcripts)/tree\\.tar")
     private fun interrupted() { if (Thread.currentThread().isInterrupted) throw InterruptedException("Recovery framing interrupted; retain isolation") }
 
     fun validate(manifest: CapsuleManifest) {
@@ -25,9 +26,10 @@ internal object RecoverySegments {
         val files = manifest.files.associateBy { it.name }
         val claimed = mutableSetOf<String>()
         for (item in manifest.volumes) {
-            require(volume.matches(item.name) && item.name.startsWith(manifest.generation + "-") && item.name !in files &&
+            require((volume.matches(item.name) && item.name.startsWith(manifest.generation + "-") || managed.matches(item.name)) &&
+                item.name !in files &&
                 item.bytes in 1024..RecoveryCapsule.MAX_TOTAL && item.bytes % 512 == 0L && hash.matches(item.sha256) &&
-                item.segments.size in 2..128) { "Invalid segmented volume" }
+                item.segments.size in 2..512) { "Invalid segmented volume" }
             require(item.segments == item.segments.indices.map { "${item.name}.part-${it.toString().padStart(4, '0')}" }) { "Noncanonical segment order" }
             val parts = item.segments.map { name ->
                 require(claimed.add(name)) { "Shared recovery segment" }
@@ -35,7 +37,8 @@ internal object RecoverySegments {
                     require(it.bytes in 1..RecoveryCapsule.MAX_FILE && hash.matches(it.sha256))
                 }
             }
-            require(parts.sumOf { it.bytes } == item.bytes) { "Segment size mismatch" }
+            require(parts.sumOf { it.bytes } == item.bytes &&
+                (!managed.matches(item.name) || manifest.managedFiles.containsAll(item.segments))) { "Segment size or managed ownership mismatch" }
         }
     }
 
@@ -44,10 +47,10 @@ internal object RecoverySegments {
         require(segmentBytes in 512..RecoveryCapsule.MAX_FILE && segmentBytes % 512 == 0L)
         val result = mutableListOf<RecoveryVolume>()
         for ((name, path) in payloads.toMap()) {
-            if (!volume.matches(name) || Files.size(path) <= segmentBytes) continue
+            if (!(volume.matches(name) || managed.matches(name)) || Files.size(path) <= segmentBytes) continue
             RecoveryCapsule.guard(path, RecoveryCapsule.MAX_TOTAL)
             val size = Files.size(path)
-            require(size % 512 == 0L && (size + segmentBytes - 1) / segmentBytes <= 128)
+            require(size % 512 == 0L && (size + segmentBytes - 1) / segmentBytes <= 512)
             val originalHash = RecoveryCapsule.fileHash(path)
             val parts = mutableListOf<String>()
             Files.newInputStream(path, READ, NOFOLLOW_LINKS).use { input ->

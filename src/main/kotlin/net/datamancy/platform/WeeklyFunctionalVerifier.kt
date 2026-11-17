@@ -64,7 +64,9 @@ internal class WeeklyFunctionalVerifier(private val now: () -> Instant,
             val adapter = Path.of(case.adapter)
             val out = request.parent.resolve("adapter.stdout"); val err = request.parent.resolve("adapter.stderr")
             for (log in listOf(out, err)) Files.createFile(log, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
-            val remaining = Duration.between(now(), deadline).seconds; require(remaining > 0)
+            val remaining = minOf(Duration.between(now(), deadline).seconds,
+                RecoveryDeadline.remainingSecondsIfBound() ?: Long.MAX_VALUE)
+            require(remaining > 0)
             val process = start(ProcessBuilder("/usr/bin/python3", "-I", adapter.toString(), "--request", request.toString(), "--result", result.toString())
                 .redirectOutput(out.toFile()).redirectError(err.toFile()).apply {
                     environment().clear(); environment().putAll(mapOf("PATH" to "/usr/bin:/bin", "JAVA_HOME" to "/usr/lib/jvm/java-21-openjdk-amd64", "LANG" to "C.UTF-8"))
@@ -72,7 +74,14 @@ internal class WeeklyFunctionalVerifier(private val now: () -> Instant,
             try {
                 require(process.waitFor(remaining, java.util.concurrent.TimeUnit.SECONDS)) { "Functional adapter timeout; unknown outcome retained" }
                 require(process.exitValue() == 0) { "Functional adapter failed" }
-            } catch (e: Exception) { process.destroy(); throw e }
+            } catch (e: Exception) {
+                // Only this evaluator's process tree. Never restart an uncertain adapter or
+                // release a fenced source merely because its process exited/was interrupted.
+                process.descendants().use { children -> children.forEach { it.destroyForcibly() } }
+                process.destroyForcibly()
+                if (e is InterruptedException) Thread.currentThread().interrupt()
+                throw e
+            }
         }
     }
     fun verify(plan: WeeklyFunctionalPlan, request: WeeklyFunctionalRequest, attempt: Path, deadline: Instant): WeeklyFunctionalResult {

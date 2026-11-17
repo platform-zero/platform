@@ -19,13 +19,23 @@ import kotlinx.serialization.json.Json
 @Serializable internal data class WeeklyRestoreSlot(val bindingSha256: String, val sunday: String, val operation: String, val target: String)
 @Serializable internal data class WeeklyFunctionalResult(val operation: String, val target: String, val targetBundleSha256: String,
     val snapshotId: String, val assertions: Set<String>, val passed: Boolean)
+@Serializable internal data class WeeklyCompletionProof(val heldSha256: String, val targetIsolationSha256: String,
+    val sourceResumeAuthoritySha256: String, val sourceResumeResultSha256: String)
 @Serializable internal data class WeeklyRestoreResult(val operation: String, val target: String, val targetBundleSha256: String,
     val snapshot: KopiaSnapshotReceipt, val functional: WeeklyFunctionalResult, val requiredAssertions: Set<String>,
-    val targetIsolation: GenerationOutcome, val sourceResumed: Boolean)
+    val targetIsolation: GenerationOutcome, val sourceResumed: Boolean,
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val completionProof: WeeklyCompletionProof? = null,
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val nativeCompletion: GenerationCompletionReceipt? = null)
 @Serializable internal data class WeeklyRestoreTick(val status: String, val slot: WeeklyRestoreSlot? = null,
     val result: WeeklyRestoreResult? = null)
 
 internal interface WeeklyRestoreBackend {
+    /** Deadline is monotonic-enforced by schedule and independently bound at the native adapter. */
+    fun bindDeadline(deadline: Instant) {}
     fun holdSource(): GenerationHeldCapture
     fun restore(snapshot: KopiaSnapshotReceipt): GenerationOutcome
     fun startTarget(imported: GenerationOutcome)
@@ -33,6 +43,11 @@ internal interface WeeklyRestoreBackend {
     fun isolateTarget(imported: GenerationOutcome): GenerationOutcome
     fun verifyTargetIsolation(isolation: GenerationOutcome)
     fun resumeSource(fences: Map<String, String>)
+    /** Native implementations derive this from four immutable independently read journals. */
+    fun completionProof(held: GenerationHeldCapture, imported: GenerationOutcome,
+        isolation: GenerationOutcome): WeeklyCompletionProof? = null
+    fun completionReceipt(held: GenerationHeldCapture, imported: GenerationOutcome,
+        isolation: GenerationOutcome): GenerationCompletionReceipt? = null
 }
 
 /** Single-use weekly restore ledger. Failure, timeout, interruption and unknown results NEVER resume
@@ -72,6 +87,25 @@ internal class WeeklyRestoreSchedule(private val base: Path, private val now: ()
             require(result.target.matches(Regex("q-[a-f0-9]{12}")) && result.target != result.snapshot.generation && result.targetBundleSha256.matches(hash))
             require(result.requiredAssertions.isNotEmpty() && result.functional == WeeklyFunctionalResult(result.operation, result.target,
                 result.targetBundleSha256, result.snapshot.snapshotId, result.requiredAssertions, true)) { "Incomplete or foreign functional restore evaluation" }
+            result.completionProof?.let { proof ->
+                require(proof.heldSha256.matches(hash) && proof.targetIsolationSha256.matches(hash) &&
+                    proof.sourceResumeAuthoritySha256.matches(hash) && proof.sourceResumeResultSha256.matches(hash)) {
+                    "Malformed native completion proof"
+                }
+            }
+            result.nativeCompletion?.let { receipt ->
+                val proof = receipt.proof.also { it.validate() }
+                val access = RuntimeBackupAccess(result.snapshot.generation, result.operation, result.snapshot.bundleSha256)
+                require(proof.access == access && proof.snapshotId == result.snapshot.snapshotId &&
+                    proof.target == result.target && proof.targetBundleSha256 == result.targetBundleSha256 &&
+                    proof.targetFences == result.targetIsolation.fences && receipt.record.sha256.matches(hash) &&
+                    receipt.record.path.endsWith("/${access.generation}/backups/${access.operation}/completion.proof.json") &&
+                    result.completionProof?.heldSha256 == proof.heldSha256 &&
+                    result.completionProof?.sourceResumeResultSha256 == proof.sourceResultSha256 &&
+                    result.completionProof?.sourceResumeAuthoritySha256 == proof.resumeAuthoritySha256) {
+                    "Generation completion proof differs from the scheduled restore lineage"
+                }
+            }
             require(result.sourceResumed && result.targetIsolation.passed && result.targetIsolation.failureType == null &&
                 result.targetIsolation.action == "isolate" && result.targetIsolation.bundleSha256 == result.targetBundleSha256 &&
                 result.targetIsolation.fences.isNotEmpty() && result.targetIsolation.fences.keys.all { it.startsWith(result.target + "-") } &&
@@ -138,7 +172,7 @@ internal class WeeklyRestoreSchedule(private val base: Path, private val now: ()
         else ReleasePrivateFiles.save(path, expected.toByteArray())
     }
     fun units(generation: String, expected: String): Map<String, String> = WeeklyRestoreUnits.render(binding(root(generation), expected), expected)
-    fun tick(generation: String, expected: String): WeeklyRestoreTick = ReleasePrivateFiles.locked(root(generation)) {
+    fun tick(generation: String, expected: String): WeeklyRestoreTick = RecoveryDeadline.within { ReleasePrivateFiles.locked(root(generation)) {
         val root = root(generation); val binding = binding(root, expected); controller(binding)
         if (Files.exists(root.resolve("suspended"), NOFOLLOW_LINKS)) {
             require(ReleasePrivateFiles.read(root.resolve("suspended")).decodeToString() == expected)
@@ -150,9 +184,21 @@ internal class WeeklyRestoreSchedule(private val base: Path, private val now: ()
         val attempts = root.resolve("slots")
         if (!Files.exists(attempts, NOFOLLOW_LINKS)) mkdir(attempts)
         ReleasePrivateFiles.directory(attempts)
-        val prior = Files.list(attempts).use { it.limit(129).toList() }; require(prior.size <= 128)
+        val history = ScheduleHistory.inspect(root, expected, "weekly")
+        require(history.lastDay == null || due >= history.lastDay) { "Archived weekly clock rollback" }
+        val prior = mutableListOf<Path>()
+        Files.list(attempts).use { paths -> paths.forEach { attempt ->
+            val day = attempt.fileName.toString()
+            require(day.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")) && java.time.LocalDate.parse(day).toString() == day)
+            if (day in history.archivedDays) ReleasePrivateFiles.directory(attempt)
+            else {
+                require(history.lastDay == null || day > history.lastDay) { "Unindexed old weekly slot" }
+                require(prior.size < ScheduleHistory.PAGE_SIZE) { "Unresolved weekly history bound reached" }
+                prior.add(attempt)
+            }
+        } }
         var completed: WeeklyRestoreResult? = null
-        for (attempt in prior) {
+        for (attempt in prior.sorted()) {
             ReleasePrivateFiles.directory(attempt)
             val date = attempt.fileName.toString()
             require(date <= due && date >= sunday(Instant.parse(binding.source.enrolledAt))) { "Clock rollback or foreign weekly slot" }
@@ -165,7 +211,17 @@ internal class WeeklyRestoreSchedule(private val base: Path, private val now: ()
             } catch (e: Exception) { alert(root, expected); throw IllegalStateException("Unknown weekly outcome; never retry or resume", e) }
         }
         if (completed != null) return@locked WeeklyRestoreTick("already-completed", slot(expected, due), completed)
-        require(prior.size < 128)
+        if (history.lastDay == due) {
+            val priorResult = read<WeeklyRestoreResult>(attempts.resolve("$due/result.json"))
+            validateResult(priorResult)
+            references(generation).requireTerminalWeekly(priorResult)
+            return@locked WeeklyRestoreTick("already-completed", slot(expected, due), priorResult)
+        }
+        if (prior.size == ScheduleHistory.PAGE_SIZE) {
+            val refs = references(generation)
+            prior.forEach { refs.requireTerminalWeekly(read<WeeklyRestoreResult>(it.resolve("result.json"))) }
+            ScheduleHistory.checkpoint(root, expected, "weekly", prior.map { it.fileName.toString() }.sorted())
+        }
         val inventory = ReleasePrivateFiles.read(root.resolve("inventory.json"))
         require(ReleaseLocks.sha256(inventory) == binding.source.inventorySha256)
         val slot = slot(expected, due); require(slot.target != generation)
@@ -174,6 +230,7 @@ internal class WeeklyRestoreSchedule(private val base: Path, private val now: ()
         val started = monotonicNanos()
         var lastObserved = current
         fun budget() {
+            RecoveryDeadline.remainingMillis()
             check(!Thread.currentThread().isInterrupted) { "Weekly worker interrupted" }
             val observed = now(); val elapsed = monotonicNanos() - started
             check(observed >= lastObserved && observed < deadline && elapsed in 0 until BUDGET_SECONDS * 1_000_000_000L) {
@@ -187,6 +244,7 @@ internal class WeeklyRestoreSchedule(private val base: Path, private val now: ()
         }
         try {
             val native = backend(binding, slot, json.decodeFromString(inventory.decodeToString()), attempt)
+            native.bindDeadline(deadline)
             val held = effect("hold-source", native::holdSource).also { it.validate() }
             val snapshot = held.snapshot; KopiaGenerationStore.validate(snapshot)
             require(held.access == RuntimeBackupAccess(generation, slot.operation, binding.source.bundleSha256) &&
@@ -206,7 +264,13 @@ internal class WeeklyRestoreSchedule(private val base: Path, private val now: ()
             effect("verify-isolation") { native.verifyTargetIsolation(isolation) }
             save(attempt.resolve("isolation.json"), isolation)
             effect("resume-source") { native.resumeSource(fences) }
-            val result = WeeklyRestoreResult(slot.operation, slot.target, imported.bundleSha256, snapshot, functional, binding.requiredAssertions, isolation, true)
+            val proof = native.completionProof(held, imported, isolation)
+            val receipt = native.completionReceipt(held, imported, isolation)
+            require(native !is NativeWeeklyRestoreBackend || proof != null && receipt != null) {
+                "Native durable completion proof and locked runtime receipt required"
+            }
+            val result = WeeklyRestoreResult(slot.operation, slot.target, imported.bundleSha256, snapshot, functional,
+                binding.requiredAssertions, isolation, true, proof, receipt)
             validateResult(result)
             refs.verified(result)
             if (refs.retentionReady()) {
@@ -214,7 +278,12 @@ internal class WeeklyRestoreSchedule(private val base: Path, private val now: ()
                     binding.source.bundleSha256, "r-" + slot.operation.removePrefix("cap-")) }
                 save(attempt.resolve("retention.json"), retained)
             }
+            budget()
             save(attempt.resolve("result.json"), result)
+            budget()
+            // Terminal closure is valid only after the durable result exists. Failure to append the
+            // terminal record leaves conservative reference protection, never permission to retry.
+            refs.retireWeekly(result)
             WeeklyRestoreTick("completed", slot, result)
         } catch (e: Exception) {
             val interrupted = Thread.interrupted() || e is InterruptedException
@@ -222,7 +291,7 @@ internal class WeeklyRestoreSchedule(private val base: Path, private val now: ()
             finally { if (interrupted) Thread.currentThread().interrupt() }
             throw e
         }
-    }
+    } }
 }
 
 internal object WeeklyRestoreUnits {
@@ -281,6 +350,16 @@ internal class NativeWeeklyRestoreBackend(private val base: Path, private val bi
     private val source = bundle(binding.source.generation, binding.source.bundleSha256)
     private var held: GenerationHeldCapture? = null
     private var targetBundle: String? = null
+    private var deadline: Instant? = null
+    override fun bindDeadline(deadline: Instant) {
+        require(deadline > Instant.now() && this.deadline == null)
+        this.deadline = deadline
+    }
+    private fun timeRemaining() {
+        check(Instant.now() < requireNotNull(deadline) && !Thread.currentThread().isInterrupted) {
+            "Native weekly restore deadline expired; retain fences"
+        }
+    }
     private fun members(bundle: GenerationBundle) = GenerationRuntime.validateScope(bundle.request).map { member -> bundle.members.single { it.member == member }.spec }
     private fun functionalPlan(): WeeklyFunctionalPlan {
         val bytes = ReleasePrivateFiles.read(attempt.parent.parent.resolve("functional-plan.json"))
@@ -299,36 +378,82 @@ internal class NativeWeeklyRestoreBackend(private val base: Path, private val bi
         return plan
     }
     override fun holdSource(): GenerationHeldCapture {
+        timeRemaining()
         WeeklyFunctionalVerifier.validateInstalled(functionalPlan()) // Fail missing/tampered probes before source maintenance.
+        timeRemaining()
         return runtime.holdKopiaForRestore(inventory, binding.source.generation,
-            binding.source.bundleSha256, slot.operation).also { held = it }
+            binding.source.bundleSha256, slot.operation).also { timeRemaining(); held = it }
     }
-    override fun restore(snapshot: KopiaSnapshotReceipt) = runtime.restoreKopiaWholeRelease(inventory, snapshot.generation, snapshot.bundleSha256,
-        snapshot.id, slot.target, targetStore = source.request.store).also { targetBundle = it.bundleSha256 }
+    override fun restore(snapshot: KopiaSnapshotReceipt): GenerationOutcome {
+        timeRemaining()
+        return runtime.restoreKopiaWholeRelease(inventory, snapshot.generation, snapshot.bundleSha256,
+            snapshot.id, slot.target, targetStore = source.request.store).also { timeRemaining(); targetBundle = it.bundleSha256 }
+    }
     override fun startTarget(imported: GenerationOutcome) {
+        timeRemaining()
         require(imported == json.decodeFromString<GenerationOutcome>(ReleasePrivateFiles.read(
             base.resolve("${slot.target}/stage.result.json")).decodeToString()))
         check(runtime.startRestored(inventory, slot.target, imported.bundleSha256).passed) { "Weekly restore startup failed" }
+        timeRemaining()
     }
     override fun verify(snapshot: KopiaSnapshotReceipt, imported: GenerationOutcome, deadline: Instant): WeeklyFunctionalResult {
+        timeRemaining()
+        require(deadline == this.deadline)
         return WeeklyFunctionalVerifier.real().verify(functionalPlan(),
-            WeeklyFunctionalRequest(slot.operation, snapshot, slot.target, imported.bundleSha256, binding.requiredAssertions), attempt, deadline)
+            WeeklyFunctionalRequest(slot.operation, snapshot, slot.target, imported.bundleSha256, binding.requiredAssertions), attempt, deadline).also { timeRemaining() }
     }
-    override fun isolateTarget(imported: GenerationOutcome) = runtime.isolate(slot.target, imported.bundleSha256)
+    override fun isolateTarget(imported: GenerationOutcome): GenerationOutcome {
+        timeRemaining()
+        return runtime.isolate(slot.target, imported.bundleSha256).also { timeRemaining() }
+    }
     override fun verifyTargetIsolation(isolation: GenerationOutcome) {
+        timeRemaining()
         val target = bundle(slot.target, isolation.bundleSha256)
         require(isolation.fences.keys == target.members.map { it.spec.name }.toSet())
         val native = PrivateDeployment.real(target.members.associate { it.member.name to it.runtimeFingerprint })
         for (spec in members(target)) {
             require(native.maintenanceStatus(spec)?.id == isolation.fences.getValue(spec.name))
             require(native.status(spec).none { it.state in setOf("running", "paused", "restarting", "created") }) { "Target isolation not observed" }
+            timeRemaining()
         }
     }
     override fun resumeSource(fences: Map<String, String>) {
+        timeRemaining()
         val hold = requireNotNull(held); require(fences == hold.fences)
         val result = runtime.resumeHeldSourceAfterIsolation(inventory, binding.source.generation, binding.source.bundleSha256,
             slot.operation, hold.sha256, slot.target, requireNotNull(targetBundle))
         require(result.passed && result.sourceResumed && result.snapshot == hold.snapshot && result.failureType == null)
+        timeRemaining()
+    }
+    override fun completionReceipt(held: GenerationHeldCapture, imported: GenerationOutcome,
+        isolation: GenerationOutcome): GenerationCompletionReceipt {
+        timeRemaining()
+        require(held == this.held && isolation.bundleSha256 == requireNotNull(targetBundle) &&
+            imported.bundleSha256 == isolation.bundleSha256)
+        return runtime.completionProof(binding.source.generation, binding.source.bundleSha256,
+            slot.operation, slot.target, isolation.bundleSha256)
+    }
+    override fun completionProof(held: GenerationHeldCapture, imported: GenerationOutcome,
+        isolation: GenerationOutcome): WeeklyCompletionProof {
+        timeRemaining()
+        require(held == this.held && imported.bundleSha256 == requireNotNull(targetBundle))
+        val source = base.resolve("${binding.source.generation}/backups/${slot.operation}")
+        val heldBytes = ReleasePrivateFiles.read(source.resolve("held.json"))
+        val resultBytes = ReleasePrivateFiles.read(source.resolve("result.json"))
+        val authorityBytes = ReleasePrivateFiles.read(source.resolve("resume.authority.json"))
+        val isolationBytes = ReleasePrivateFiles.read(base.resolve("${slot.target}/isolate.result.json"))
+        require(json.decodeFromString<GenerationHeldCapture>(heldBytes.decodeToString()) == held &&
+            json.decodeFromString<GenerationBackupOutcome>(resultBytes.decodeToString()) ==
+                GenerationBackupOutcome(held.access, true, held.snapshot, true) &&
+            json.decodeFromString<HeldSourceResumeAuthority>(authorityBytes.decodeToString()) ==
+                HeldSourceResumeAuthority(held.sha256, slot.target, imported.bundleSha256, isolation.fences) &&
+            json.decodeFromString<GenerationOutcome>(isolationBytes.decodeToString()) == isolation &&
+            json.decodeFromString<RuntimeBackupAccess>(ReleasePrivateFiles.read(source.resolve("resume.verified.json")).decodeToString()) == held.access) {
+            "Native isolation and source-resume journals do not prove completion"
+        }
+        timeRemaining()
+        return WeeklyCompletionProof(ReleaseLocks.sha256(heldBytes), ReleaseLocks.sha256(isolationBytes),
+            ReleaseLocks.sha256(authorityBytes), ReleaseLocks.sha256(resultBytes))
     }
 }
 
